@@ -52,7 +52,7 @@ func (p *pingDelegate) NotifyPingComplete(other *memberlist.Node, rtt time.Durat
 	// Verify ping version in the header.
 	version := payload[0]
 	if version != PingVersion {
-		p.g.log.Error("[multiraft] [self-gossip-user] [ping-delegate] [NotifyPingComplete] [version]", zap.Uint8("version", version))
+		p.g.log.Error("raft self-gossip-user ping-delegate NotifyPingComplete [version]", zap.Uint8("version", version))
 		return
 	}
 
@@ -61,7 +61,7 @@ func (p *pingDelegate) NotifyPingComplete(other *memberlist.Node, rtt time.Durat
 	dec := codec.NewDecoder(r, &codec.MsgpackHandle{})
 	var coord coordinate.Coordinate
 	if err := dec.Decode(&coord); err != nil {
-		p.g.log.Error("[multiraft] [self-gossip-user] [ping-delegate] [NotifyPingComplete] [decode]", zap.Error(err))
+		p.g.log.Error("raft self-gossip-user ping-delegate NotifyPingComplete decode", zap.Error(err))
 		return
 	}
 
@@ -70,7 +70,7 @@ func (p *pingDelegate) NotifyPingComplete(other *memberlist.Node, rtt time.Durat
 	after, err := p.g.coordClient.Update(other.Name, &coord, rtt)
 	if err != nil {
 		//metrics.IncrCounter([]string{"serf", "coordinate", "rejected"}, 1)
-		p.g.log.Error("[multiraft] [self-gossip-user] [ping-delegate] [NotifyPingComplete] [rejected]", zap.Error(err))
+		p.g.log.Error("raft self-gossip-user ping-delegate NotifyPingComplete rejected", zap.Error(err))
 		return
 	}
 
@@ -79,14 +79,14 @@ func (p *pingDelegate) NotifyPingComplete(other *memberlist.Node, rtt time.Durat
 	d := float32(before.DistanceTo(after).Seconds() * 1.0e3)
 	//metrics.AddSample([]string{"serf", "coordinate", "adjustment-ms"}, d)
 	if d >= 100.0 {
-		p.g.log.Warn("[multiraft] [self-gossip-user] [ping-delegate] [NotifyPingComplete] [DistanceTo]",
+		p.g.log.Warn("raft self-gossip-user ping-delegate NotifyPingComplete DistanceTo",
 			zap.String("src", p.g.opts.Name),
 			zap.String("dest", other.Name),
 			zap.Int64("rtt", int64(rtt)),
 			zap.Float32("adjustment-ms", d),
 		)
 	} else {
-		p.g.log.Info("[multiraft] [self-gossip-user] [ping-delegate] [NotifyPingComplete] [DistanceTo]",
+		p.g.log.Info("raft self-gossip-user ping-delegate NotifyPingComplete DistanceTo",
 			zap.String("src", p.g.opts.Name),
 			zap.String("dest", other.Name),
 			zap.Int64("rtt", int64(rtt)),

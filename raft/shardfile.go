@@ -33,7 +33,7 @@ func writeMetadataToFile(filepath string, meta *RaftMetadata) error {
 	return ioutil.WriteFile(filepath, b, 0644)
 }
 
-func readClusterFromFile(filepath string) (*gossip.RaftClusterMessage, error) {
+func readShardFromFile(filepath string) (*gossip.RaftShardMessage, error) {
 	if !fileExist(filepath) {
 		return nil, os.ErrNotExist
 	}
@@ -43,17 +43,17 @@ func readClusterFromFile(filepath string) (*gossip.RaftClusterMessage, error) {
 		return nil, err
 	}
 
-	cluster := &gossip.RaftClusterMessage{}
-	err = json.Unmarshal(b, cluster)
+	shard := &gossip.RaftShardMessage{}
+	err = json.Unmarshal(b, shard)
 	if err != nil {
 		return nil, err
 	}
 
-	return cluster, nil
+	return shard, nil
 }
 
-func writeClusterToFile(filepath string, cluster *gossip.RaftClusterMessage) error {
-	b, _ := json.MarshalIndent(cluster, "", "    ")
+func writeShardToFile(filepath string, shard *gossip.RaftShardMessage) error {
+	b, _ := json.MarshalIndent(shard, "", "    ")
 
 	return ioutil.WriteFile(filepath, b, 0644)
 }

@@ -13,9 +13,9 @@ import (
 )
 
 type LoggerOptions struct {
-	logDir string
-	nodeId uint64
-	target string
+	logDir    string
+	replicaId uint64
+	target    string
 }
 
 var Lo *LoggerOptions = &LoggerOptions{
@@ -26,8 +26,8 @@ func (lo *LoggerOptions) SetLogDir(dir string) {
 	lo.logDir = dir
 }
 
-func (lo *LoggerOptions) SetNodeId(nodeId uint64) {
-	lo.nodeId = nodeId
+func (lo *LoggerOptions) SetReplicaId(replicaId uint64) {
+	lo.replicaId = replicaId
 }
 
 func (lo *LoggerOptions) SetTarget(target string) {
@@ -99,14 +99,14 @@ func (c *raftLogger) fmsg() string {
 func (c *raftLogger) Debugf(format string, args ...interface{}) {
 	c.log.Debug(c.fmsg(),
 		zap.String("target", Lo.target),
-		zap.Uint64("nodeId", Lo.nodeId),
+		zap.Uint64("replicaId", Lo.replicaId),
 		zap.String("msg", fmt.Sprintf(format, args...)),
 	)
 }
 
 func (c *raftLogger) Infof(format string, args ...interface{}) {
 	c.log.Info(c.fmsg(), zap.String("target", Lo.target),
-		zap.Uint64("nodeId", Lo.nodeId),
+		zap.Uint64("replicaId", Lo.replicaId),
 		zap.String("msg", fmt.Sprintf(format, args...)),
 	)
 }
@@ -114,7 +114,7 @@ func (c *raftLogger) Infof(format string, args ...interface{}) {
 func (c *raftLogger) Warningf(format string, args ...interface{}) {
 	c.log.Warn(c.fmsg(),
 		zap.String("target", Lo.target),
-		zap.Uint64("nodeId", Lo.nodeId),
+		zap.Uint64("replicaId", Lo.replicaId),
 		zap.String("msg", fmt.Sprintf(format, args...)),
 	)
 }
@@ -122,7 +122,7 @@ func (c *raftLogger) Warningf(format string, args ...interface{}) {
 func (c *raftLogger) Errorf(format string, args ...interface{}) {
 	c.log.Error(c.fmsg(),
 		zap.String("target", Lo.target),
-		zap.Uint64("nodeId", Lo.nodeId),
+		zap.Uint64("replicaId", Lo.replicaId),
 		zap.String("msg", fmt.Sprintf(format, args...)),
 	)
 }
@@ -130,7 +130,7 @@ func (c *raftLogger) Errorf(format string, args ...interface{}) {
 func (c *raftLogger) Panicf(format string, args ...interface{}) {
 	c.log.Panic(c.fmsg(),
 		zap.String("target", Lo.target),
-		zap.Uint64("nodeId", Lo.nodeId),
+		zap.Uint64("replicaId", Lo.replicaId),
 		zap.String("msg", fmt.Sprintf(format, args...)),
 	)
 }

@@ -9,13 +9,13 @@ enum MoveToStatus {
 }
 
 message MoveToCommand {
-    // 根据hashkey计算的clusterId
-    uint64 cluster_id = 1;
+    // 根据hashkey计算的shardId
+    uint64 shard_id = 1;
 
-    // cluster的版本号
+    // shard revision
     int64 revision = 2;
 
-    // 待执行的命令序列化字节数组
+    // todo command bytes array
     bytes cmd = 4;
 }
 
@@ -23,7 +23,7 @@ message MoveToResponse {
     // 返回的状态, 用于标记是否调转到可执行命令的节点上了
     MoveToStatus status = 1;
 
-    // 没命中时，moveTo节点的cluster集群分配版本号
+    // 没命中时，moveTo节点的shard集群分配版本号
     int64 revision = 2;
 
     // 没命中时，建议跳转的节点
@@ -33,13 +33,13 @@ message MoveToResponse {
 }
 
 message RaftInvokeOp {
-    uint64 node_id = 1;
+    uint64 replica_id = 1;
     string target = 2;
-    uint64 cluster_id = 3;
+    uint64 shard_id = 3;
     uint32 op = 4;
     bool linear = 5;
 
-    // cluster的版本号
+    // per shard config revision
     int64 revision = 6;
 }
 

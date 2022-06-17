@@ -32,12 +32,12 @@ import (
 
 func initPebble() *store.Store {
 	dir := "/tmp/pebbledb"
-	nodeId := 200000
-	clusterId := 10001
-	raftPath := filepath.Join(dir, fmt.Sprintf("data_node%d", nodeId))
+	replicaId := 200000
+	shardId := 10001
+	raftPath := filepath.Join(dir, fmt.Sprintf("data_node%d", replicaId))
 	os.RemoveAll(raftPath)
-	s, err := store.NewStore(uint64(clusterId), filepath.Join(raftPath, strconv.Itoa(int(clusterId))),
-		store.PebbleClusterOption{}, nil,
+	s, err := store.NewStore(uint64(shardId), filepath.Join(raftPath, strconv.Itoa(int(shardId))),
+		store.PebbleShardOption{}, nil,
 	)
 	if err != nil {
 		panic(err)

@@ -33,8 +33,8 @@ func (c *GetCommand) GetType() CommandType {
 	return GET
 }
 
-func (c *GetCommand) RaftInvoke(ctx context.Context, nh *dragonboat.NodeHost, clusterId uint64, _ *client.Session) (err error) {
-	c.resp, err = syncRead(ctx, nh, clusterId, c)
+func (c *GetCommand) RaftInvoke(ctx context.Context, nh *dragonboat.NodeHost, shardId uint64, _ *client.Session) (err error) {
+	c.resp, err = syncRead(ctx, nh, shardId, c)
 	return err
 }
 

@@ -17,16 +17,16 @@ import (
 )
 
 type Store struct {
-	clusterId uint64
-	path      string
-	opts      PebbleClusterOption
-	log       *zap.Logger
-	db        *pebble.DB
-	ro        *pebble.IterOptions
-	wo        *pebble.WriteOptions
+	shardId uint64
+	path    string
+	opts    PebbleShardOption
+	log     *zap.Logger
+	db      *pebble.DB
+	ro      *pebble.IterOptions
+	wo      *pebble.WriteOptions
 }
 
-func NewStore(clusterId uint64, path string, opts PebbleClusterOption, log *zap.Logger) (*Store, error) {
+func NewStore(shardId uint64, path string, opts PebbleShardOption, log *zap.Logger) (*Store, error) {
 	cfg := getDefaultPebbleDBConfig()
 
 	db, err := openPebbleDB(cfg, filepath.Join(path, "current"), opts, log)
@@ -35,13 +35,13 @@ func NewStore(clusterId uint64, path string, opts PebbleClusterOption, log *zap.
 	}
 
 	return &Store{
-		clusterId: clusterId,
-		log:       log,
-		opts:      opts,
-		db:        db,
-		ro:        &pebble.IterOptions{},
-		wo:        &pebble.WriteOptions{Sync: false},
-		path:      path,
+		shardId: shardId,
+		log:     log,
+		opts:    opts,
+		db:      db,
+		ro:      &pebble.IterOptions{},
+		wo:      &pebble.WriteOptions{Sync: false},
+		path:    path,
 	}, nil
 }
 
@@ -52,7 +52,7 @@ func (s *Store) GetColumnFamily(cf string) byte {
 func (s *Store) GetBytes(key []byte) ([]byte, error) {
 	val, closer, err := s.db.Get(key)
 
-	// 查询的key不存在，返回空值
+	// query key not found, return nil
 	if err == pebble.ErrNotFound {
 		return []byte{}, nil
 	}
@@ -61,7 +61,7 @@ func (s *Store) GetBytes(key []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	// 这里需要copy
+	// must be copy
 	data := make([]byte, len(val))
 	copy(data, val)
 
@@ -247,25 +247,24 @@ func readFileToWriter(path string, f *fileInfo, writer io.Writer) error {
 	}
 	defer file.Close()
 
-	//读取文件名
+	//read file name
 	var fileName = []byte(f.FullName)
 	fileName = append(fileName, '\n')
 	if err := writeTo(fileName, writer); err != nil {
 		return err
 	}
 
-	//读取文件大小
+	//read file size
 	var fileSize = make([]byte, 8)
 	binary.BigEndian.PutUint64(fileSize, uint64(f.Size))
 	if err := writeTo(fileSize, writer); err != nil {
 		return err
 	}
 
-	// 读取文件内容，写入writer
-	if _, err := io.Copy(writer, file); err != nil {
-		return err
-	}
-	return nil
+	// read file content
+	_, err = io.Copy(writer, file)
+
+	return err
 }
 
 func writeTo(bytes []byte, writer io.Writer) error {

@@ -66,7 +66,7 @@ var (
 		"127.0.0.1:31004": 34004,
 	}
 
-	// 同步cluster信息的gossip
+	// 同步shard信息的gossip
 	gossipAddrs = []string{
 		"127.0.0.1:33000",
 		"127.0.0.1:33001",
@@ -75,12 +75,12 @@ var (
 		"127.0.0.1:33004",
 	}
 
-	// key: addr, val: clusterIds
-	nodeMap map[string][]uint64
+	// key: addr, val: shardIds
+	replicaMap map[string][]uint64
 )
 
 func init2() {
-	nodeMap = generateRaftClusters()
+	replicaMap = generateRaftShards()
 }
 
 func newTestStorage(addr string, cfg *raft.RaftConfig) *raft.Storage {
@@ -92,22 +92,22 @@ func newTestStorage(addr string, cfg *raft.RaftConfig) *raft.Storage {
 	return s
 }
 
-func newGossipStorage() ([]*raft.Storage, *gossip.RaftClusterMessage) {
+func newGossipStorage() ([]*raft.Storage, *gossip.RaftShardMessage) {
 	init2()
-	initRcm := initClusterMessage(nodeMap)
+	initRcm := initShardMessage(replicaMap)
 
 	storages := []*raft.Storage{}
 	wg := sync.WaitGroup{}
 	wg.Add(len(raftAddrs))
 	for i, addr := range raftAddrs {
 		go func(i int, addr string) {
-			nodeId := addr2RaftNodeID(addr)
+			replicaId := addr2RaftReplicaID(addr)
 			cfg := &raft.RaftConfig{
 				LogDir:         logDir,
 				LogLevel:       level,
 				HostIP:         hostIP,
-				NodeId:         nodeId,
-				ClusterIds:     nodeMap[addr],
+				ReplicaId:      replicaId,
+				ShardIds:       replicaMap[addr],
 				RaftAddr:       addr,
 				GrpcPort:       grpcPorts[addr],
 				StorageDir:     storageDir,
@@ -137,10 +137,10 @@ func newGossipStorage() ([]*raft.Storage, *gossip.RaftClusterMessage) {
 }
 
 type kv struct {
-	key       string
-	val       []byte
-	clusterId uint64
-	idx       int
+	key     string
+	val     []byte
+	shardId uint64
+	idx     int
 }
 
 // 单线程测试结果:
@@ -185,7 +185,7 @@ func benchmarkRaftGetChaos(num, vlen int, linear bool, storages []*raft.Storage,
 			val: []byte(randomLength(vlen)),
 		}
 
-		v.clusterId = getClusterId(v.key)
+		v.shardId = getShardId(v.key)
 
 		s := storages[i%sl]
 		_, err := s.Put(config.ColumnFamilyDefault, v.key, []byte(v.key), v.val)
@@ -226,7 +226,7 @@ func benchmarkRaftPutChaos(num, vlen int, storages []*raft.Storage, b *testing.B
 			val: []byte(randomLength(vlen)),
 		}
 
-		v.clusterId = getClusterId(v.key)
+		v.shardId = getShardId(v.key)
 		kvs = append(kvs, v)
 	}
 
@@ -252,10 +252,10 @@ func benchmarkRaftPutChaos(num, vlen int, storages []*raft.Storage, b *testing.B
 }
 
 func benchmarkRaftPutLocal(num, vlen int, storages []*raft.Storage, b *testing.B) {
-	clusterMap := make(map[uint64][]int)
+	shardMap := make(map[uint64][]int)
 	for i, s := range storages {
-		for _, clusterId := range s.GetClusterMessage().Targets[s.GetTarget()].ClusterIds {
-			clusterMap[clusterId] = append(clusterMap[clusterId], i)
+		for _, shardId := range s.GetShardMessage().Targets[s.GetTarget()].ShardIds {
+			shardMap[shardId] = append(shardMap[shardId], i)
 		}
 	}
 
@@ -266,10 +266,10 @@ func benchmarkRaftPutLocal(num, vlen int, storages []*raft.Storage, b *testing.B
 			val: []byte(randomLength(vlen)),
 		}
 
-		v.clusterId = getClusterId(v.key)
-		idx, ok := clusterMap[v.clusterId]
+		v.shardId = getShardId(v.key)
+		idx, ok := shardMap[v.shardId]
 		if !ok {
-			b.Fatalf("clusterId: %d not found storage", v.clusterId)
+			b.Fatalf("shardId: %d not found storage", v.shardId)
 		}
 
 		v.idx = idx[mrand.Intn(len(idx))]
@@ -301,13 +301,13 @@ func BenchmarkRaftStorage(b *testing.B) {
 	storages, initRcm := newGossipStorage()
 
 	sort.Slice(storages, func(i, j int) bool {
-		return storages[i].GetNodeId() < storages[j].GetNodeId()
+		return storages[i].GetReplicaId() < storages[j].GetReplicaId()
 	})
 
 	b.Logf("==================storage start over======================")
 
 	for _, s := range storages {
-		rcm, err := raft.ReadClusterFromFile(storageDir, s.GetNodeId())
+		rcm, err := raft.ReadShardFromFile(storageDir, s.GetReplicaId())
 		if err != nil {
 			if err == os.ErrNotExist {
 				rcm = initRcm
@@ -316,7 +316,7 @@ func BenchmarkRaftStorage(b *testing.B) {
 			}
 		}
 
-		s.UpdateClusterMessage(rcm)
+		s.UpdateShardMessage(rcm)
 	}
 
 	time.Sleep(2 * time.Second)
@@ -338,27 +338,27 @@ func BenchmarkRaftStorage(b *testing.B) {
 	}
 }
 
-func initClusterMessage(nodeMap map[string][]uint64) *gossip.RaftClusterMessage {
-	clusters := make(map[uint64][]string)
-	targets := make(map[string]gossip.TargetClusterId)
+func initShardMessage(replicaMap map[string][]uint64) *gossip.RaftShardMessage {
+	shards := make(map[uint64][]string)
+	targets := make(map[string]gossip.TargetShardId)
 	m := make(map[string]uint64)
-	for addr, clusterIds := range nodeMap {
-		nodeId := addr2RaftNodeID(addr)
-		targetAddr := fmt.Sprintf("nhid-%d", nodeId)
-		m[targetAddr] = nodeId
-		for _, clusterId := range clusterIds {
-			clusters[clusterId] = append(clusters[clusterId], targetAddr)
+	for addr, shardIds := range replicaMap {
+		replicaId := addr2RaftReplicaID(addr)
+		targetAddr := fmt.Sprintf("nhid-%d", replicaId)
+		m[targetAddr] = replicaId
+		for _, shardId := range shardIds {
+			shards[shardId] = append(shards[shardId], targetAddr)
 		}
 		ss := strings.Split(addr, ":")
-		targets[targetAddr] = gossip.TargetClusterId{
-			GrpcAddr:   fmt.Sprintf("%s:%d", ss[0], grpcPorts[addr]),
-			ClusterIds: clusterIds,
+		targets[targetAddr] = gossip.TargetShardId{
+			GrpcAddr: fmt.Sprintf("%s:%d", ss[0], grpcPorts[addr]),
+			ShardIds: shardIds,
 		}
 	}
 
 	initialMembers := make(map[uint64]map[uint64]string)
 	join := make(map[uint64]map[uint64]bool)
-	for clusterId, targets := range clusters {
+	for shardId, targets := range shards {
 		im := make(map[uint64]string)
 		jn := make(map[uint64]bool)
 		for _, target := range targets {
@@ -366,14 +366,14 @@ func initClusterMessage(nodeMap map[string][]uint64) *gossip.RaftClusterMessage 
 			jn[m[target]] = false
 		}
 
-		initialMembers[clusterId] = im
-		join[clusterId] = jn
+		initialMembers[shardId] = im
+		join[shardId] = jn
 	}
 
-	initRcm := &gossip.RaftClusterMessage{
+	initRcm := &gossip.RaftShardMessage{
 		Revision:       1,
 		Targets:        targets,
-		Clusters:       clusters,
+		Shards:         shards,
 		InitialMembers: initialMembers,
 		Join:           join,
 	}
@@ -381,28 +381,28 @@ func initClusterMessage(nodeMap map[string][]uint64) *gossip.RaftClusterMessage 
 	return initRcm
 }
 
-func getClusterId(hashKey string) uint64 {
+func getShardId(hashKey string) uint64 {
 	return uint64(crc32.ChecksumIEEE([]byte(hashKey)) % uint32(groupNumber))
 }
 
-func generateRaftClusters() map[string][]uint64 {
+func generateRaftShards() map[string][]uint64 {
 	groups := combination(raftAddrs, groupMachine)
 	n := len(groups)
 	skip := (n - groupNumber) / 2
 
-	clusters := [][]string{}
+	shards := [][]string{}
 	for i := 0; i < groupNumber; i++ {
-		clusters = append(clusters, groups[i+skip])
+		shards = append(shards, groups[i+skip])
 	}
 
-	nodeMap := make(map[string][]uint64)
-	for id, cluster := range clusters {
-		for _, addr := range cluster {
-			nodeMap[addr] = append(nodeMap[addr], uint64(id))
+	replicaMap := make(map[string][]uint64)
+	for id, shard := range shards {
+		for _, addr := range shard {
+			replicaMap[addr] = append(replicaMap[addr], uint64(id))
 		}
 	}
 
-	return nodeMap
+	return replicaMap
 }
 
 // [
@@ -448,7 +448,7 @@ func helper(arrs []string, start, k, n int, ans []string, res *[][]string) {
 	}
 }
 
-func addr2RaftNodeID(addr string) uint64 {
+func addr2RaftReplicaID(addr string) uint64 {
 	s := strings.Split(addr, ":")
 	bits := strings.Split(s[0], ".")
 

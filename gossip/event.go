@@ -67,7 +67,7 @@ func newEventDelegate(s *syncutil.Stopper, g *GossipManager) *eventDelegate {
 
 func (d *eventDelegate) decodeMeta(e memberlist.NodeEvent, fields []zap.Field) *Meta {
 	if len(e.Node.Meta) == 0 || messageType(e.Node.Meta[0]) != tagMagicByte {
-		d.g.log.Warn("[multiraft] [self-gossip-user] [eventdelegate] [metaType]",
+		d.g.log.Warn("multiraft self-gossip-user eventdelegate metaType",
 			append(fields,
 				zap.Int("event", int(e.Event)),
 				zap.String("nodename", e.Node.Name),
@@ -80,7 +80,7 @@ func (d *eventDelegate) decodeMeta(e memberlist.NodeEvent, fields []zap.Field) *
 
 	meta := &Meta{}
 	if err := decodeMessage(e.Node.Meta[1:], &meta); err != nil {
-		d.g.log.Warn("[multiraft] [self-gossip-user] [eventdelegate] [metaDecode]",
+		d.g.log.Warn("multiraft self-gossip-user eventdelegate metaDecode",
 			append(fields,
 				zap.Int("event", int(e.Event)),
 				zap.String("nodename", e.Node.Name),
@@ -109,7 +109,7 @@ func (d *eventDelegate) start() {
 			case e := <-d.ch:
 				meta := d.decodeMeta(e, fields)
 				if e.Event == memberlist.NodeJoin || e.Event == memberlist.NodeUpdate {
-					d.g.log.Info("[multiraft] [self-gossip-user] [eventdelegate] [update]",
+					d.g.log.Info("multiraft self-gossip-user eventdelegate update",
 						append(fields,
 							zap.Int("event", int(e.Event)),
 							zap.String("nodename", e.Node.Name),
@@ -120,7 +120,7 @@ func (d *eventDelegate) start() {
 					d.nodes.Store(e.Node.Name, string(e.Node.Meta))
 					d.g.aliveInstance.updateInstance(meta, true)
 				} else if e.Event == memberlist.NodeLeave {
-					d.g.log.Info("[multiraft] [self-gossip-user] [eventdelegate] [delete]",
+					d.g.log.Info("multiraft self-gossip-user eventdelegate delete",
 						append(fields,
 							zap.Int("event", int(e.Event)),
 							zap.String("nodename", e.Node.Name),

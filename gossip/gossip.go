@@ -27,7 +27,7 @@ type GossipManager struct {
 
 	aliveInstance *aliveInstance
 
-	clusterBroadcasts    *memberlist.TransmitLimitedQueue
+	shardBroadcasts      *memberlist.TransmitLimitedQueue
 	membershipBroadcasts *memberlist.TransmitLimitedQueue
 
 	log *zap.Logger
@@ -39,7 +39,7 @@ type GossipManager struct {
 	d  *delegate
 
 	// Estimates the round trip time between two nodes using Gossip's network
-	// coordinate model of the cluster.
+	// coordinate model of the shard.
 	coordClient    *coordinate.Client
 	coordCache     map[string]*coordinate.Coordinate
 	coordCacheLock sync.RWMutex
@@ -94,7 +94,7 @@ func NewGossipManager(config GossipConfig, opts GossipOptions) (*GossipManager, 
 	d := newDelegate(Meta{
 		MoveToGrpcAddr: opts.MoveToGrpcAddr,
 		ServerGrpcAddr: opts.ServerGrpcAddr,
-	}, g, config.clusterCallback)
+	}, g, config.shardCallback)
 	cfg.Delegate = d
 	g.d = d
 
@@ -110,7 +110,7 @@ func NewGossipManager(config GossipConfig, opts GossipOptions) (*GossipManager, 
 		cfg.Ping = &pingDelegate{g: g}
 	}
 
-	g.clusterBroadcasts = &memberlist.TransmitLimitedQueue{
+	g.shardBroadcasts = &memberlist.TransmitLimitedQueue{
 		NumNodes: func() int {
 			return list.NumMembers()
 		},
@@ -161,7 +161,7 @@ func (g *GossipManager) join(seed []string) error {
 
 	count, err := g.list.Join(seed)
 	if err != nil {
-		g.log.Warn("[multiraft] [self-gossip-user] [gossipmanager] [join] []",
+		g.log.Warn("raft self-gossip-user gossip manager join",
 			append(fields,
 				zap.Strings("seed", seed),
 				zap.Error(err),
@@ -170,7 +170,7 @@ func (g *GossipManager) join(seed []string) error {
 		return err
 	}
 
-	g.log.Debug("[multiraft] [self-gossip-user] [gossipmanager] [join] []",
+	g.log.Debug("raft self-gossip-user gossip manager join",
 		append(fields,
 			zap.Int("count", count),
 		)...,
@@ -179,40 +179,40 @@ func (g *GossipManager) join(seed []string) error {
 	return nil
 }
 
-func (g *GossipManager) GetClusterMessage() *RaftClusterMessage {
-	return g.d.queryCluster()
+func (g *GossipManager) GetShardMessage() *RaftShardMessage {
+	return g.d.queryShard()
 }
 
-func (g *GossipManager) UpdateClusterMessage(cluster *RaftClusterMessage) {
+func (g *GossipManager) UpdateShardMessage(shard *RaftShardMessage) {
 	localNode := g.list.LocalNode()
 	fields := []zap.Field{
 		zap.String("name", localNode.Name),
 		zap.String("address", localNode.Address()),
 	}
 
-	buf, err := encodeMessage(messageClusterType, cluster)
+	buf, err := encodeMessage(messageShardType, shard)
 	if err != nil {
-		g.log.Warn("[multiraft] [self-gossip-user] [apicall] [cluster] [update]",
+		g.log.Warn("raft self-gossip-user apicall shard update",
 			append(fields,
-				zap.Stringer("message", cluster),
+				zap.Stringer("message", shard),
 				zap.Error(err),
 			)...,
 		)
 		return
 	}
 
-	g.log.Debug("[multiraft] [self-gossip-user] [apicall] [cluster] [update]",
+	g.log.Debug("raft self-gossip-user apicall shard update",
 		append(fields,
-			zap.Stringer("message", cluster),
+			zap.Stringer("message", shard),
 		)...,
 	)
-	g.d.localUpdateCluster(cluster)
+	g.d.localUpdateShard(shard)
 
-	g.clusterBroadcasts.QueueBroadcast(newBroadcast(buf))
+	g.shardBroadcasts.QueueBroadcast(newBroadcast(buf))
 }
 
-func (g *GossipManager) GetMembershipMessage(clusterId uint64) *MemberInfo {
-	return g.d.queryMembership(clusterId)
+func (g *GossipManager) GetMembershipMessage(shardId uint64) *MemberInfo {
+	return g.d.queryMembership(shardId)
 }
 
 func (g *GossipManager) GetMembershipMessages() map[uint64]*MemberInfo {
@@ -231,7 +231,7 @@ func (g *GossipManager) UpdateMembershipMessage(membership *RaftMembershipMessag
 
 	buf, err := encodeMessage(messageMembershipType, membership)
 	if err != nil {
-		g.log.Warn("[multiraft] [self-gossip-user] [apicall] [membership] [update]",
+		g.log.Warn("raft self-gossip-user apicall membership update",
 			append(fields,
 				zap.Stringer("message", membership),
 				zap.Error(err),
@@ -240,7 +240,7 @@ func (g *GossipManager) UpdateMembershipMessage(membership *RaftMembershipMessag
 		return
 	}
 
-	g.log.Debug("[multiraft] [self-gossip-user] [apicall] [membership] [update]",
+	g.log.Debug("raft self-gossip-user apicall membership update",
 		append(fields,
 			zap.Stringer("message", membership),
 		)...,

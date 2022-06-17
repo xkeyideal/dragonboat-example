@@ -13,23 +13,23 @@ import (
 )
 
 type StateMachine struct {
-	ClusterID uint64
-	NodeID    uint64
+	ShardId   uint64
+	ReplicaID uint64
 	store     *store.Store
 
 	// db里存储revision的key
 	indexKey []byte
 }
 
-func newStateMachine(clusterid uint64, nodeId uint64, s *store.Store) *StateMachine {
+func newStateMachine(shardId uint64, replicaId uint64, s *store.Store) *StateMachine {
 	// 生成存储revision的key
 	smIndexKey := make([]byte, len(indexKeyPrefix)+8)
 	copy(smIndexKey, indexKeyPrefix)
-	binary.BigEndian.PutUint64(smIndexKey[len(indexKeyPrefix):], clusterid)
+	binary.BigEndian.PutUint64(smIndexKey[len(indexKeyPrefix):], shardId)
 
 	return &StateMachine{
-		ClusterID: clusterid,
-		NodeID:    nodeId,
+		ShardId:   shardId,
+		ReplicaID: replicaId,
 		indexKey:  smIndexKey,
 		store:     s,
 	}

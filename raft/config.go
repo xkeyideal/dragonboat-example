@@ -16,8 +16,8 @@ var (
 	indexKeyPrefix = []byte("__RAFT_APPLIED_INDEX__")
 
 	moveToErr       = errors.New("MoveTo Jump Exceed")
-	sessionNotFound = errors.New("Raft clusterId session not found")
-	storeNotFound   = errors.New("Raft clusterId store not found")
+	sessionNotFound = errors.New("Raft shardId session not found")
+	storeNotFound   = errors.New("Raft shardId store not found")
 )
 
 const (
@@ -30,16 +30,16 @@ const (
 	// raft集群的meta数据存储的文件名
 	metadataFileName = "raft-metadata"
 
-	// cluster信息存储的文件名
-	clusterFileName = "raft-storage-cluster"
+	// shard信息存储的文件名
+	shardFileName = "raft-storage-shard"
 )
 
 type RaftMetadata struct {
-	// raft cluster的分组个数, 用于hashKey计算clusterId
+	// raft shard的分组个数, 用于hashKey计算shardId
 	MultiGroupSize uint32 `json:"multiGroupSize"`
 
 	// 本地的节点ID
-	NodeId uint64 `json:"nodeId"`
+	ReplicaId uint64 `json:"replicaId"`
 
 	// raft节点的IP地址
 	// 启动前需校验机器IP是否发生变化
@@ -54,7 +54,7 @@ type RaftMetadata struct {
 	// 是否采用gossip方式启动
 	Gossip bool `json:"gossip"`
 
-	// 节点clusterId分配的版本号
+	// 节点shardId分配的版本号
 	Revision int64 `json:"revision"`
 
 	// 如果raft集群采用gossip可变IP的方式启动需设置
@@ -95,11 +95,11 @@ type RaftConfig struct {
 	// 本机IP地址
 	HostIP string
 
-	// nodeId一旦生成不能变动
-	NodeId uint64
+	// ReplicaId一旦生成不能变动
+	ReplicaId uint64
 
-	// 该节点被分配的clusterIds
-	ClusterIds []uint64
+	// 该节点被分配的shardIds
+	ShardIds []uint64
 
 	// raft通信地址
 	RaftAddr string
@@ -107,7 +107,7 @@ type RaftConfig struct {
 	// 用于moveTo命令时对方raft节点的grpc端口
 	GrpcPort uint16
 
-	// raft cluster的分组个数, 用于hashKey计算clusterId
+	// raft shard的分组个数, 用于hashKey计算shardId
 	MultiGroupSize uint32
 
 	// 数据存储地址
@@ -120,7 +120,7 @@ type RaftConfig struct {
 	// 采用gossip方式启动时val是nodehostId, 详细参考dragonboat的文档,
 	// 初次可以使用dragonboat id.NewNodeHostID(id uint64)来生成;
 	// 若采用raftAddr固定不变的方式启动，val就是raftAddr
-	// key: clusterId, key:nodeId
+	// key: shardId, key:replicaId
 	InitialMembers map[uint64]map[uint64]string
 
 	// 如果raft集群采用gossip可变IP的方式启动需设置
@@ -135,13 +135,13 @@ type RaftConfig struct {
 	GossipConfig gossip.GossipConfig
 }
 
-func buildRaftConfig(nodeId, clusterId uint64) config.Config {
+func buildRaftConfig(replicaId, shardId uint64) config.Config {
 	rc := config.Config{
 		//当前节点的ID
-		NodeID: nodeId,
+		NodeID: replicaId,
 
 		//当前节点的分片ID,如果当前raft是多组的,那么这个地方是指定当前组的ID
-		ClusterID: clusterId,
+		ClusterID: shardId,
 
 		//领导节点是否应定期检查非领导者节点的状态，并在其不再具有法定人数时退出成为跟随者节点
 		//当有5台机器,挂了3台,法定人数不够,则主节点退出,不再是主节点了,所有的写操作和同步读操作应该都不能执行了
@@ -214,7 +214,7 @@ func buildRaftConfig(nodeId, clusterId uint64) config.Config {
 	return rc
 }
 
-func buildNodeHostConfigByGossip(raftDir string, nodeId uint64, gossipPort uint16, hostIP string, raftAddr string,
+func buildNodeHostConfigByGossip(raftDir string, replicaId uint64, gossipPort uint16, hostIP string, raftAddr string,
 	gossipSeeds []string, metrics bool, re *raftEvent, se *systemEvent) config.NodeHostConfig {
 	return config.NodeHostConfig{
 		// DeploymentID用于确定两个NodeHost实例是否属于同一部署，并因此允许彼此通信。
@@ -280,7 +280,7 @@ func buildNodeHostConfigByGossip(raftDir string, nodeId uint64, gossipPort uint1
 		SystemEventListener: se,
 
 		Expert: config.ExpertConfig{
-			TestNodeHostID: nodeId,
+			TestNodeHostID: replicaId,
 		},
 	}
 }

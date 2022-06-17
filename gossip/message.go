@@ -15,39 +15,39 @@ import (
 type messageType uint8
 
 const (
-	messageClusterType messageType = iota
+	messageShardType messageType = iota
 	messageMembershipType
 	messagePushPullType
 )
 
-type TargetClusterId struct {
-	GrpcAddr   string   `json:"grpcAddr"`
-	ClusterIds []uint64 `json:"clusterIds"`
+type TargetShardId struct {
+	GrpcAddr string   `json:"grpcAddr"`
+	ShardIds []uint64 `json:"shardIds"`
 }
 
-type RaftClusterMessage struct {
+type RaftShardMessage struct {
 	Revision int64 `json:"revision"`
 
 	// 机器ID对应的MoveTo的GRPC地址
 	// key: 当raft以nodehostid=true的方式起的时候是机器ID，以固定地址方式起是raftAddr
-	Targets map[string]TargetClusterId `json:"targets"`
+	Targets map[string]TargetShardId `json:"targets"`
 
-	// 每个raft cluster对应的机器ID|raftAddr
-	Clusters map[uint64][]string `json:"clusters"`
+	// 每个raft shard对应的机器ID|raftAddr
+	Shards map[uint64][]string `json:"shards"`
 
-	// 每个raft cluster的initial members
-	// key: clusterId, key: nodeId, val: raftAddr或nodeHostID
+	// 每个raft shard的initial members
+	// key: shardId, key: replicaId, val: raftAddr或nodeHostID
 	InitialMembers map[uint64]map[uint64]string `json:"initial_members"`
 	Join           map[uint64]map[uint64]bool   `json:"join"`
 }
 
-func (rm *RaftClusterMessage) String() string {
+func (rm *RaftShardMessage) String() string {
 	b, _ := json.Marshal(rm)
 	return string(b)
 }
 
 type MemberInfo struct {
-	ClusterId      uint64
+	ShardId        uint64
 	ConfigChangeId uint64
 	Nodes          map[uint64]string
 	Observers      map[uint64]string
@@ -61,7 +61,7 @@ func (mi *MemberInfo) String() string {
 }
 
 type RaftMembershipMessage struct {
-	// key: clusterId
+	// key: shardId
 	MemberInfos map[uint64]*MemberInfo
 }
 
@@ -71,7 +71,7 @@ func (rm *RaftMembershipMessage) String() string {
 }
 
 type PushPullMessage struct {
-	Cluster    *RaftClusterMessage
+	Shard      *RaftShardMessage
 	Membership *RaftMembershipMessage
 }
 

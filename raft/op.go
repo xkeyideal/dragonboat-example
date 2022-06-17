@@ -11,16 +11,16 @@ import (
 func (s *Storage) Put(cfName string, hashKey string, confID, confBytes []byte) (uint64, error) {
 	cmd := command.NewPutCommand(cfName, confID, confBytes)
 
-	clusterId := s.getClusterId(hashKey)
+	shardId := s.getShardId(hashKey)
 	var (
 		res []byte
 		err error
 	)
 
-	if s.moveToCheck(clusterId) {
-		res, err = s.moveToInvoke(clusterId, cmd)
+	if s.moveToCheck(shardId) {
+		res, err = s.moveToInvoke(shardId, cmd)
 	} else {
-		res, err = s.invoke(clusterId, cmd)
+		res, err = s.invoke(shardId, cmd)
 	}
 
 	if err != nil {
@@ -36,17 +36,17 @@ func (s *Storage) Put(cfName string, hashKey string, confID, confBytes []byte) (
 
 func (s *Storage) Get(cfName string, hashKey string, linearizable bool, key []byte) (uint64, []byte, error) {
 	cmd := command.NewGetCommand(cfName, key, linearizable)
-	clusterId := s.getClusterId(hashKey)
+	shardId := s.getShardId(hashKey)
 
 	var (
 		res []byte
 		err error
 	)
 
-	if s.moveToCheck(clusterId) {
-		res, err = s.moveToInvoke(clusterId, cmd)
+	if s.moveToCheck(shardId) {
+		res, err = s.moveToInvoke(shardId, cmd)
 	} else {
-		res, err = s.invoke(clusterId, cmd)
+		res, err = s.invoke(shardId, cmd)
 	}
 
 	if err != nil {
@@ -64,16 +64,16 @@ func (s *Storage) TryLock(lockTimeout uint64, cfName string, key string) (bool, 
 		return false, nil
 	}
 	cmd := command.NewTryLockCommand(cfName, key, timeoutSecond)
-	clusterId := s.getClusterId(key)
+	shardId := s.getShardId(key)
 	var (
 		res []byte
 		err error
 	)
 
-	if s.moveToCheck(clusterId) {
-		res, err = s.moveToInvoke(clusterId, cmd)
+	if s.moveToCheck(shardId) {
+		res, err = s.moveToInvoke(shardId, cmd)
 	} else {
-		res, err = s.invoke(clusterId, cmd)
+		res, err = s.invoke(shardId, cmd)
 	}
 
 	if err != nil {
@@ -88,16 +88,16 @@ func (s *Storage) TryLock(lockTimeout uint64, cfName string, key string) (bool, 
 
 func (s *Storage) TryUnLock(cfName string, key string) (bool, error) {
 	cmd := command.NewTryUnLockCommand(cfName, key)
-	clusterId := s.getClusterId(key)
+	shardId := s.getShardId(key)
 	var (
 		res []byte
 		err error
 	)
 
-	if s.moveToCheck(clusterId) {
-		res, err = s.moveToInvoke(clusterId, cmd)
+	if s.moveToCheck(shardId) {
+		res, err = s.moveToInvoke(shardId, cmd)
 	} else {
-		res, err = s.invoke(clusterId, cmd)
+		res, err = s.invoke(shardId, cmd)
 	}
 
 	if err != nil {
@@ -112,17 +112,17 @@ func (s *Storage) TryUnLock(cfName string, key string) (bool, error) {
 
 func (s *Storage) Search(cfName string, hashKey string, linearizable bool, prefix []byte) ([][]byte, error) {
 	cmd := command.NewSearchCommand(cfName, prefix, linearizable)
-	clusterId := s.getClusterId(hashKey)
+	shardId := s.getShardId(hashKey)
 
 	var (
 		res []byte
 		err error
 	)
 
-	if s.moveToCheck(clusterId) {
-		res, err = s.moveToInvoke(clusterId, cmd)
+	if s.moveToCheck(shardId) {
+		res, err = s.moveToInvoke(shardId, cmd)
 	} else {
-		res, err = s.invoke(clusterId, cmd)
+		res, err = s.invoke(shardId, cmd)
 	}
 
 	if err != nil {
@@ -138,16 +138,16 @@ func (s *Storage) Search(cfName string, hashKey string, linearizable bool, prefi
 
 func (s *Storage) Del(cfName string, hashKey string, key []byte) error {
 	cmd := command.NewDelCommand(cfName, key)
-	clusterId := s.getClusterId(hashKey)
+	shardId := s.getShardId(hashKey)
 
 	var (
 		err error
 	)
 
-	if s.moveToCheck(clusterId) {
-		_, err = s.moveToInvoke(clusterId, cmd)
+	if s.moveToCheck(shardId) {
+		_, err = s.moveToInvoke(shardId, cmd)
 	} else {
-		_, err = s.invoke(clusterId, cmd)
+		_, err = s.invoke(shardId, cmd)
 	}
 
 	return err
@@ -155,16 +155,16 @@ func (s *Storage) Del(cfName string, hashKey string, key []byte) error {
 
 func (s *Storage) DelPrefix(cfName string, hashKey string, prefix []byte) error {
 	cmd := command.NewDelPrefixCommand(cfName, prefix)
-	clusterId := s.getClusterId(hashKey)
+	shardId := s.getShardId(hashKey)
 
 	var (
 		err error
 	)
 
-	if s.moveToCheck(clusterId) {
-		_, err = s.moveToInvoke(clusterId, cmd)
+	if s.moveToCheck(shardId) {
+		_, err = s.moveToInvoke(shardId, cmd)
 	} else {
-		_, err = s.invoke(clusterId, cmd)
+		_, err = s.invoke(shardId, cmd)
 	}
 
 	return err

@@ -20,7 +20,7 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-func WriteClusterToFile(cluster *gossip.RaftClusterMessage) error {
+func WriteShardToFile(shard *gossip.RaftShardMessage) error {
 	return nil
 }
 
@@ -28,7 +28,7 @@ var (
 	logDir = "/tmp/logs"
 	level  = zapcore.DebugLevel
 
-	gossipClusters = []string{
+	gossipShards = []string{
 		"127.0.0.1:8001",
 		"127.0.0.1:8002",
 		"127.0.0.1:8003",
@@ -39,7 +39,7 @@ var (
 	membership = &gossip.RaftMembershipMessage{
 		MemberInfos: map[uint64]*gossip.MemberInfo{
 			1: {
-				ClusterId:      1,
+				ShardId:        1,
 				ConfigChangeId: 1,
 				Nodes: map[uint64]string{
 					10001: "127.0.0.1:9001",
@@ -50,7 +50,7 @@ var (
 				LeaderValid: true,
 			},
 			2: {
-				ClusterId:      1,
+				ShardId:        1,
 				ConfigChangeId: 1,
 				Nodes: map[uint64]string{
 					10001: "127.0.0.1:9001",
@@ -61,7 +61,7 @@ var (
 				LeaderValid: true,
 			},
 			3: {
-				ClusterId:      1,
+				ShardId:        1,
 				ConfigChangeId: 1,
 				Nodes: map[uint64]string{
 					10001: "127.0.0.1:9001",
@@ -72,7 +72,7 @@ var (
 				LeaderValid: true,
 			},
 			4: {
-				ClusterId:      1,
+				ShardId:        1,
 				ConfigChangeId: 1,
 				Nodes: map[uint64]string{
 					10002: "127.0.0.1:9002",
@@ -85,27 +85,27 @@ var (
 		},
 	}
 
-	clusterMessage = &gossip.RaftClusterMessage{
+	shardMessage = &gossip.RaftShardMessage{
 		Revision: 1,
-		Targets: map[string]gossip.TargetClusterId{
+		Targets: map[string]gossip.TargetShardId{
 			"raft-1": {
-				GrpcAddr:   "127.0.0.1:6001",
-				ClusterIds: []uint64{1, 2, 3},
+				GrpcAddr: "127.0.0.1:6001",
+				ShardIds: []uint64{1, 2, 3},
 			},
 			"raft-2": {
-				GrpcAddr:   "127.0.0.1:6002",
-				ClusterIds: []uint64{1, 2, 3, 4},
+				GrpcAddr: "127.0.0.1:6002",
+				ShardIds: []uint64{1, 2, 3, 4},
 			},
 			"raft-3": {
-				GrpcAddr:   "127.0.0.1:6003",
-				ClusterIds: []uint64{1, 2, 4},
+				GrpcAddr: "127.0.0.1:6003",
+				ShardIds: []uint64{1, 2, 4},
 			},
 			"raft-4": {
-				GrpcAddr:   "127.0.0.1:6004",
-				ClusterIds: []uint64{3, 4},
+				GrpcAddr: "127.0.0.1:6004",
+				ShardIds: []uint64{3, 4},
 			},
 		},
-		Clusters: map[uint64][]string{
+		Shards: map[uint64][]string{
 			1: {"raft-1", "raft-2", "raft-3"},
 			2: {"raft-1", "raft-2", "raft-3"},
 			3: {"raft-1", "raft-2", "raft-4"},
@@ -115,18 +115,18 @@ var (
 )
 
 func TestGossip(t *testing.T) {
-	clusters := []*gossip.GossipManager{}
+	shards := []*gossip.GossipManager{}
 	for i := 0; i < 3; i++ {
 		cfg := gossip.GossipConfig{
 			BindAddress: fmt.Sprintf("0.0.0.0:%d", seed[i]),
 			BindPort:    seed[i],
-			Seeds:       gossipClusters,
+			Seeds:       gossipShards,
 		}
 
-		cfg.SetClusterCallback(WriteClusterToFile)
+		cfg.SetShardCallback(WriteShardToFile)
 
 		name := namePrefix + fmt.Sprintf("%d", seed[i])
-		moveToGrpcAddr := clusterMessage.Targets[fmt.Sprintf("raft-%d", i+1)].GrpcAddr
+		moveToGrpcAddr := shardMessage.Targets[fmt.Sprintf("raft-%d", i+1)].GrpcAddr
 		gossipOpts := gossip.GossipOptions{
 			Name:               name,
 			MoveToGrpcAddr:     moveToGrpcAddr,
@@ -134,61 +134,61 @@ func TestGossip(t *testing.T) {
 			LogLevel:           level,
 			DisableCoordinates: true,
 		}
-		cluster, err := gossip.NewGossipManager(cfg, gossipOpts)
+		shard, err := gossip.NewGossipManager(cfg, gossipOpts)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		cluster.SetNodeMeta(gossip.Meta{
+		shard.SetNodeMeta(gossip.Meta{
 			MoveToGrpcAddr: moveToGrpcAddr,
 			ServerGrpcAddr: moveToGrpcAddr,
 		})
 
-		clusters = append(clusters, cluster)
+		shards = append(shards, shard)
 	}
 
 	// 初始化原始的数据状态
-	for _, cluster := range clusters {
-		cluster.UpdateMembershipMessage(membership)
-		cluster.UpdateClusterMessage(clusterMessage)
+	for _, shard := range shards {
+		shard.UpdateMembershipMessage(membership)
+		shard.UpdateShardMessage(shardMessage)
 		time.Sleep(time.Duration(rand.Intn(5)) * time.Second)
 	}
 
 	// 查询初始化的数据是否与期望的相同
-	cm := clusters[1].GetClusterMessage()
-	if !reflect.DeepEqual(cm, clusterMessage) {
-		t.Fatalf("init cluster message unexpected, %v, %v", cm, clusterMessage)
+	cm := shards[1].GetShardMessage()
+	if !reflect.DeepEqual(cm, shardMessage) {
+		t.Fatalf("init shard message unexpected, %v, %v", cm, shardMessage)
 	}
 
 	t.Logf("=================update=======================")
 
 	cm.Revision += 1
-	cm.Clusters = map[uint64][]string{
+	cm.Shards = map[uint64][]string{
 		1: {"raft-1", "raft-2", "raft-3"},
 		2: {"raft-1", "raft-2", "raft-3", "raft-5"},
 		3: {"raft-1", "raft-2", "raft-4"},
 		4: {"raft-1", "raft-2", "raft-3", "raft-4", "raft-5"},
 	}
-	clusters[2].UpdateClusterMessage(cm)
+	shards[2].UpdateShardMessage(cm)
 
 	for retry := 0; retry < 3; retry++ {
-		newCm := clusters[0].GetClusterMessage()
+		newCm := shards[0].GetShardMessage()
 		if !reflect.DeepEqual(cm, newCm) && retry == 3 {
-			t.Fatalf("update cluster message unexpected, %v, %v", cm, newCm)
+			t.Fatalf("update shard message unexpected, %v, %v", cm, newCm)
 		}
 		time.Sleep(2 * time.Second)
 	}
 
 	time.Sleep(2 * time.Second)
-	t.Logf("==================add cluster======================")
+	t.Logf("==================add shard======================")
 
 	cfg := gossip.GossipConfig{
 		BindAddress: fmt.Sprintf("0.0.0.0:%d", 8004),
 		BindPort:    8004,
-		Seeds:       gossipClusters,
+		Seeds:       gossipShards,
 	}
-	cfg.SetClusterCallback(WriteClusterToFile)
-	moveToGrpcAddr := clusterMessage.Targets["raft-4"].GrpcAddr
+	cfg.SetShardCallback(WriteShardToFile)
+	moveToGrpcAddr := shardMessage.Targets["raft-4"].GrpcAddr
 	gossipOpts := gossip.GossipOptions{
 		Name:               namePrefix + "8004",
 		MoveToGrpcAddr:     moveToGrpcAddr,
@@ -196,48 +196,48 @@ func TestGossip(t *testing.T) {
 		LogLevel:           level,
 		DisableCoordinates: true,
 	}
-	cluster4, err := gossip.NewGossipManager(cfg, gossipOpts)
+	shard4, err := gossip.NewGossipManager(cfg, gossipOpts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cluster4.SetNodeMeta(gossip.Meta{
+	shard4.SetNodeMeta(gossip.Meta{
 		MoveToGrpcAddr: moveToGrpcAddr,
 		ServerGrpcAddr: moveToGrpcAddr,
 	})
 
-	clusters = append(clusters, cluster4)
-	// cluster4.UpdateMembershipMessage(membership)
-	// cluster4.UpdateClusterMessage(clusterMessage)
+	shards = append(shards, shard4)
+	// shard4.UpdateMembershipMessage(membership)
+	// shard4.UpdateShardMessage(shardMessage)
 
 	// 查询初始化的数据是否与期望的相同
-	cm4 := cluster4.GetClusterMessage()
+	cm4 := shard4.GetShardMessage()
 	if !reflect.DeepEqual(cm4, cm) {
-		t.Fatalf("get init cluster4 message unexpected, %v, %v", cm4, clusterMessage)
+		t.Fatalf("get init shard4 message unexpected, %v, %v", cm4, shardMessage)
 	}
 
 	time.Sleep(4 * time.Second)
 
 	// 等待一段时间后, gossip协议应该会同步之前集群的数据
-	cm4 = cluster4.GetClusterMessage()
+	cm4 = shard4.GetShardMessage()
 	if !reflect.DeepEqual(cm4, cm) {
-		t.Fatalf("get gossip sync cluster4 message unexpected, %v, %v", cm4, cm)
+		t.Fatalf("get gossip sync shard4 message unexpected, %v, %v", cm4, cm)
 	}
 
-	t.Logf("==================add cluster down======================")
+	t.Logf("==================add shard down======================")
 
 	k := 1
 
-	t.Log(clusters[k].GetAliveInstances())
+	t.Log(shards[k].GetAliveInstances())
 
-	clusters[k].Close()
+	shards[k].Close()
 
 	time.Sleep(2 * time.Second)
 
-	t.Log(clusters[k+1].GetAliveInstances())
+	t.Log(shards[k+1].GetAliveInstances())
 
-	clusters = append(clusters[:k], clusters[k+1:]...)
+	shards = append(shards[:k], shards[k+1:]...)
 
-	t.Logf("==================close cluster down======================")
+	t.Logf("==================close shard down======================")
 
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
@@ -245,24 +245,24 @@ func TestGossip(t *testing.T) {
 	log.Println(<-signals)
 
 	// free
-	for _, cluster := range clusters {
-		cluster.Close()
+	for _, shard := range shards {
+		shard.Close()
 	}
 }
 
 func TestGossipCoordinate(t *testing.T) {
-	clusters := []*gossip.GossipManager{}
+	shards := []*gossip.GossipManager{}
 	for i := 0; i < 3; i++ {
 		cfg := gossip.GossipConfig{
 			BindAddress: fmt.Sprintf("0.0.0.0:%d", seed[i]),
 			BindPort:    seed[i],
-			Seeds:       gossipClusters,
+			Seeds:       gossipShards,
 		}
 
-		cfg.SetClusterCallback(WriteClusterToFile)
+		cfg.SetShardCallback(WriteShardToFile)
 
 		name := namePrefix + fmt.Sprintf("%d", seed[i])
-		moveToGrpcAddr := clusterMessage.Targets[fmt.Sprintf("raft-%d", i+1)].GrpcAddr
+		moveToGrpcAddr := shardMessage.Targets[fmt.Sprintf("raft-%d", i+1)].GrpcAddr
 		gossipOpts := gossip.GossipOptions{
 			Name:               name,
 			MoveToGrpcAddr:     moveToGrpcAddr,
@@ -270,41 +270,41 @@ func TestGossipCoordinate(t *testing.T) {
 			LogLevel:           level,
 			DisableCoordinates: false,
 		}
-		cluster, err := gossip.NewGossipManager(cfg, gossipOpts)
+		shard, err := gossip.NewGossipManager(cfg, gossipOpts)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		cluster.SetNodeMeta(gossip.Meta{
+		shard.SetNodeMeta(gossip.Meta{
 			MoveToGrpcAddr: moveToGrpcAddr,
 			ServerGrpcAddr: moveToGrpcAddr,
 		})
 
-		clusters = append(clusters, cluster)
+		shards = append(shards, shard)
 	}
 
 	// 初始化原始的数据状态
-	for _, cluster := range clusters {
-		cluster.UpdateMembershipMessage(membership)
-		cluster.UpdateClusterMessage(clusterMessage)
+	for _, shard := range shards {
+		shard.UpdateMembershipMessage(membership)
+		shard.UpdateShardMessage(shardMessage)
 		time.Sleep(time.Duration(rand.Intn(5)) * time.Second)
 	}
 
 	// 查询初始化的数据是否与期望的相同
-	cm := clusters[1].GetClusterMessage()
-	if !reflect.DeepEqual(cm, clusterMessage) {
-		t.Fatalf("init cluster message unexpected, %v, %v", cm, clusterMessage)
+	cm := shards[1].GetShardMessage()
+	if !reflect.DeepEqual(cm, shardMessage) {
+		t.Fatalf("init shard message unexpected, %v, %v", cm, shardMessage)
 	}
 
 	t.Logf("=================update=======================")
 
 	// Make sure both nodes start out the origin so we can prove they did
 	// an update later.
-	c1, err := clusters[0].GetCoordinate()
+	c1, err := shards[0].GetCoordinate()
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	c2, err := clusters[1].GetCoordinate()
+	c2, err := shards[1].GetCoordinate()
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -314,11 +314,11 @@ func TestGossipCoordinate(t *testing.T) {
 		t.Fatalf("coordinates didn't update after probes")
 	}
 
-	clusters[1].Close()
+	shards[1].Close()
 
-	clusters = append(clusters[:1], clusters[2:]...)
+	shards = append(shards[:1], shards[2:]...)
 
-	t.Log(clusters[0].GetCachedCoordinate(namePrefix + fmt.Sprintf("%d", seed[1])))
+	t.Log(shards[0].GetCachedCoordinate(namePrefix + fmt.Sprintf("%d", seed[1])))
 
 	t.Logf("=================down=======================")
 
@@ -328,8 +328,8 @@ func TestGossipCoordinate(t *testing.T) {
 	log.Println(<-signals)
 
 	// free
-	for _, cluster := range clusters {
-		cluster.Close()
+	for _, shard := range shards {
+		shard.Close()
 	}
 }
 
@@ -339,7 +339,7 @@ func TestGzipMsgpack(t *testing.T) {
 		"targets": {
 			"nhid-11772876509704": {
 				"grpcAddr": "127.0.0.1:24000",
-				"clusterIds": [
+				"shardIds": [
 					0,
 					1,
 					2,
@@ -349,7 +349,7 @@ func TestGzipMsgpack(t *testing.T) {
 			},
 			"nhid-11772876509705": {
 				"grpcAddr": "127.0.0.1:24001",
-				"clusterIds": [
+				"shardIds": [
 					0,
 					1,
 					5,
@@ -362,7 +362,7 @@ func TestGzipMsgpack(t *testing.T) {
 			},
 			"nhid-11772876509706": {
 				"grpcAddr": "127.0.0.1:24002",
-				"clusterIds": [
+				"shardIds": [
 					2,
 					3,
 					5,
@@ -371,7 +371,7 @@ func TestGzipMsgpack(t *testing.T) {
 			},
 			"nhid-11772876509707": {
 				"grpcAddr": "127.0.0.1:24003",
-				"clusterIds": [
+				"shardIds": [
 					0,
 					2,
 					4,
@@ -381,7 +381,7 @@ func TestGzipMsgpack(t *testing.T) {
 			},
 			"nhid-11772876509708": {
 				"grpcAddr": "127.0.0.1:24004",
-				"clusterIds": [
+				"shardIds": [
 					1,
 					3,
 					4,
@@ -390,7 +390,7 @@ func TestGzipMsgpack(t *testing.T) {
 				]
 			}
 		},
-		"clusters": {
+		"shards": {
 			"0": [
 				"nhid-11772876509704",
 				"nhid-11772876509705",
@@ -524,8 +524,8 @@ func TestGzipMsgpack(t *testing.T) {
 		}
 	}`
 
-	cluster := &gossip.RaftClusterMessage{}
-	err := json.Unmarshal([]byte(str), cluster)
+	shard := &gossip.RaftShardMessage{}
+	err := json.Unmarshal([]byte(str), shard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -535,7 +535,7 @@ func TestGzipMsgpack(t *testing.T) {
 
 	handle := codec.MsgpackHandle{}
 	encoder := codec.NewEncoder(buf, &handle)
-	err = encoder.Encode(cluster)
+	err = encoder.Encode(shard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -559,7 +559,7 @@ func TestGzipMsgpack(t *testing.T) {
 	}
 
 	var handle2 codec.MsgpackHandle
-	out := &gossip.RaftClusterMessage{}
+	out := &gossip.RaftShardMessage{}
 	err = codec.NewDecoder(bytes.NewReader(bbuf[1:]), &handle2).Decode(out)
 	if err != nil {
 		t.Fatal(err)

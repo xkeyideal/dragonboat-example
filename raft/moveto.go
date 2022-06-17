@@ -35,7 +35,7 @@ func (m *MoveTo) MoveToInvoke(ctx context.Context, req *pb.MoveToCommand) (*pb.M
 		return nil, err
 	}
 
-	revision, localAddr, linearAddr, err := m.s.moveToAddress(req.ClusterId, cmd.Linear())
+	revision, localAddr, linearAddr, err := m.s.moveToAddress(req.ShardId, cmd.Linear())
 	if err != nil {
 		m.s.log.Warn("[raftstorage] [invoke] [MoveToInvoke]",
 			zap.String("target", m.s.target),
@@ -55,7 +55,7 @@ func (m *MoveTo) MoveToInvoke(ctx context.Context, req *pb.MoveToCommand) (*pb.M
 	}
 
 	// 当本地的版本号>=MoveTo之前的版本号，才判断是否本节点是否可以命中
-	if revision >= req.Revision && m.s.moveToCheck(req.ClusterId) {
+	if revision >= req.Revision && m.s.moveToCheck(req.ShardId) {
 		// 查询本地建议执行的地址
 		return &pb.MoveToResponse{
 			Status:        pb.MoveToStatus_Miss,
@@ -65,7 +65,7 @@ func (m *MoveTo) MoveToInvoke(ctx context.Context, req *pb.MoveToCommand) (*pb.M
 	}
 
 	// 直接尝试本地是否能够执行
-	res, err := m.s.invoke(req.ClusterId, cmd)
+	res, err := m.s.invoke(req.ShardId, cmd)
 	if err != nil {
 		return nil, err
 	}
@@ -77,9 +77,9 @@ func (m *MoveTo) MoveToInvoke(ctx context.Context, req *pb.MoveToCommand) (*pb.M
 }
 
 func (m *MoveTo) RaftNodeInvoke(ctx context.Context, req *pb.RaftInvokeOp) (*pb.MoveToResponse, error) {
-	revision, localAddr, linearAddr, err := m.s.moveToAddress(req.ClusterId, req.Linear)
+	revision, localAddr, linearAddr, err := m.s.moveToAddress(req.ShardId, req.Linear)
 	if err != nil {
-		m.s.log.Warn("[raftstorage] [invoke] [RaftNodeInvoke]",
+		m.s.log.Warn("raft storage invoke RaftNodeInvoke",
 			zap.String("target", m.s.target),
 			zap.String("localAddr", localAddr),
 			zap.String("linearAddr", linearAddr),
@@ -97,7 +97,7 @@ func (m *MoveTo) RaftNodeInvoke(ctx context.Context, req *pb.RaftInvokeOp) (*pb.
 	}
 
 	// 当本地的版本号>=MoveTo之前的版本号，才判断是否本节点是否可以命中
-	if revision >= req.Revision && m.s.moveToCheck(req.ClusterId) {
+	if revision >= req.Revision && m.s.moveToCheck(req.ShardId) {
 		// 查询本地建议执行的地址
 		return &pb.MoveToResponse{
 			Status:        pb.MoveToStatus_Miss,
@@ -109,11 +109,11 @@ func (m *MoveTo) RaftNodeInvoke(ctx context.Context, req *pb.RaftInvokeOp) (*pb.
 	var rerr error
 	switch req.Op {
 	case uint32(DELETE):
-		rerr = m.s.removeRaftNode(req.NodeId, req.ClusterId)
+		rerr = m.s.removeRaftNode(req.ReplicaId, req.ShardId)
 	case uint32(ADD):
-		rerr = m.s.addRaftNode(req.NodeId, req.Target, req.ClusterId)
+		rerr = m.s.addRaftNode(req.ReplicaId, req.Target, req.ShardId)
 	case uint32(OBSERVER):
-		rerr = m.s.addRaftObserver(req.NodeId, req.Target, req.ClusterId)
+		rerr = m.s.addRaftObserver(req.ReplicaId, req.Target, req.ShardId)
 	default:
 		rerr = errors.New("RaftNodeInvoke OpType error")
 	}

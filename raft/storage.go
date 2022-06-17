@@ -33,8 +33,8 @@ import (
 	"google.golang.org/grpc/keepalive"
 )
 
-func initLogger(nodeId uint64, target string) {
-	ilogger.Lo.SetNodeId(nodeId)
+func initLogger(replicaId uint64, target string) {
+	ilogger.Lo.SetReplicaId(replicaId)
 	ilogger.Lo.SetTarget(target)
 }
 
@@ -61,16 +61,16 @@ type Storage struct {
 
 	stopper *syncutil.Stopper
 
-	// 用来记录cluster leader的变化
+	// 用来记录shard leader的变化
 	leaderc chan raftio.LeaderInfo
 
-	// 用来记录cluster membership的变化
+	// 用来记录shard membership的变化
 	memberc chan raftio.NodeInfo
 
 	cmu         sync.Mutex
 	memberCache map[uint64]*gossip.MemberInfo
 
-	// 用于同步集群信息与cluster分组信息
+	// 用于同步集群信息与shard分组信息
 	gossip *gossip.GossipManager
 
 	// grpc服务，用于接收moveTo的command
@@ -92,7 +92,7 @@ func NewStorage(ServerGrpcAddr, metricsAddr string, cfg *RaftConfig) (*Storage, 
 	}
 
 	// 初始化raft和数据的存储路径
-	raftDir, dataDir, err := initPath(cfg.StorageDir, cfg.NodeId)
+	raftDir, dataDir, err := initPath(cfg.StorageDir, cfg.ReplicaId)
 	if err != nil {
 		return nil, err
 	}
@@ -101,8 +101,8 @@ func NewStorage(ServerGrpcAddr, metricsAddr string, cfg *RaftConfig) (*Storage, 
 		cfg:         cfg,
 		status:      unready,
 		dataDir:     dataDir,
-		csMap:       make(map[uint64]*client.Session, len(cfg.ClusterIds)),
-		smMap:       make(map[uint64]*store.Store, len(cfg.ClusterIds)),
+		csMap:       make(map[uint64]*client.Session, len(cfg.ShardIds)),
+		smMap:       make(map[uint64]*store.Store, len(cfg.ShardIds)),
 		stopper:     syncutil.NewStopper(),
 		log:         zlog.NewLogger(filepath.Join(cfg.LogDir, "raft-storage.log"), cfg.LogLevel, false),
 		leaderc:     make(chan raftio.LeaderInfo, 24),
@@ -113,14 +113,14 @@ func NewStorage(ServerGrpcAddr, metricsAddr string, cfg *RaftConfig) (*Storage, 
 
 	set := make(map[uint64]struct{})
 	for _, jn := range cfg.Join {
-		for nodeId := range jn {
-			set[nodeId] = struct{}{}
+		for replicaId := range jn {
+			set[replicaId] = struct{}{}
 		}
 	}
 
 	// 初始化服务自使用的gossip同步服务
-	gossipName := fmt.Sprintf("gossip-%d", cfg.NodeId)
-	cfg.GossipConfig.SetClusterCallback(s.WriteClusterToFile)
+	gossipName := fmt.Sprintf("gossip-%d", cfg.ReplicaId)
+	cfg.GossipConfig.SetShardCallback(s.WriteShardToFile)
 	gossipOpts := gossip.GossipOptions{
 		Name:               gossipName,
 		MoveToGrpcAddr:     fmt.Sprintf("%s:%d", cfg.HostIP, cfg.GrpcPort),
@@ -143,9 +143,9 @@ func NewStorage(ServerGrpcAddr, metricsAddr string, cfg *RaftConfig) (*Storage, 
 	// 根据raft寻址配置，确定采用gossip方式寻址或固定Addr方式寻址
 	// 此处的gossip是dragonboat内部的，与上面的gossip不同
 	if cfg.Gossip {
-		s.target = fmt.Sprintf("nhid-%d", cfg.NodeId)
+		s.target = fmt.Sprintf("nhid-%d", cfg.ReplicaId)
 		nhc = buildNodeHostConfigByGossip(
-			raftDir, cfg.NodeId, cfg.GossipPort,
+			raftDir, cfg.ReplicaId, cfg.GossipPort,
 			cfg.HostIP, cfg.RaftAddr, cfg.GossipSeeds,
 			cfg.Metrics, raftEvent, systemEvent,
 		)
@@ -154,7 +154,7 @@ func NewStorage(ServerGrpcAddr, metricsAddr string, cfg *RaftConfig) (*Storage, 
 		nhc = buildNodeHostConfig(raftDir, cfg.RaftAddr, cfg.Metrics, raftEvent, systemEvent)
 	}
 
-	initLogger(cfg.NodeId, s.target)
+	initLogger(cfg.ReplicaId, s.target)
 
 	nh, err := dragonboat.NewNodeHost(nhc)
 	if err != nil {
@@ -165,8 +165,8 @@ func NewStorage(ServerGrpcAddr, metricsAddr string, cfg *RaftConfig) (*Storage, 
 	// 启动dragonboat的event变化的回调处理
 	s.stopper.RunWorker(s.handleEvents)
 
-	// 根据分配好的每个节点归属的clusterIds来初始化实例
-	err = s.stateMachine(cfg.Join, dataDir, cfg.ClusterIds)
+	// 根据分配好的每个节点归属的shardIds来初始化实例
+	err = s.stateMachine(cfg.Join, dataDir, cfg.ShardIds)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +184,7 @@ func NewStorage(ServerGrpcAddr, metricsAddr string, cfg *RaftConfig) (*Storage, 
 		}
 	}()
 
-	log.Println("[INFO] raft", s.target, "moveTo grpc started", cfg.HostIP, cfg.GrpcPort, cfg.ClusterIds)
+	log.Println("[INFO] raft", s.target, "moveTo grpc started", cfg.HostIP, cfg.GrpcPort, cfg.ShardIds)
 
 	// 初始化gossip meta
 	err = s.gossip.SetNodeMeta(gossip.Meta{
@@ -205,7 +205,7 @@ func NewStorage(ServerGrpcAddr, metricsAddr string, cfg *RaftConfig) (*Storage, 
 
 func (s *Storage) RaftReady() error {
 	ch := make(chan struct{}, 1)
-	go s.nodeReady(s.cfg.ClusterIds, ch)
+	go s.nodeReady(s.cfg.ShardIds, ch)
 
 	select {
 	case <-ch:
@@ -213,14 +213,14 @@ func (s *Storage) RaftReady() error {
 
 	// 集群启动后，先同步一遍membership
 	membership := make(map[uint64]*gossip.MemberInfo)
-	for _, clusterId := range s.cfg.ClusterIds {
-		info, err := s.getClusterMembership(clusterId)
+	for _, shardId := range s.cfg.ShardIds {
+		info, err := s.getShardMembership(shardId)
 		if err != nil {
-			log.Println("[WARN] RaftReady get cluster membership:", clusterId, err.Error())
+			log.Println("[WARN] RaftReady get shard membership:", shardId, err.Error())
 			continue
 		}
 
-		membership[clusterId] = info
+		membership[shardId] = info
 	}
 
 	s.gossip.UpdateMembershipMessage(&gossip.RaftMembershipMessage{
@@ -257,14 +257,13 @@ func (s *Storage) metricsFlush(addr string, client *httpkit.HttpClient) {
 	dragonboat.WriteHealthMetrics(buf)
 
 	client = client.SetBody(buf).SetHeader("Content-Type", "application/octet-stream")
-	// _, err := http.Post(addr, "application/octet-stream", buf)
 	_, err := client.Post(addr)
 	if err != nil {
 		s.log.Warn("[raftstorage] [metrics] [upload]", zap.Error(err))
 	}
 }
 
-func (s *Storage) stateMachine(join map[uint64]map[uint64]bool, dataDir string, clusterIds []uint64) error {
+func (s *Storage) stateMachine(join map[uint64]map[uint64]bool, dataDir string, shardIds []uint64) error {
 	var (
 		initialMembers map[uint64]string
 		jn             map[uint64]bool
@@ -272,40 +271,40 @@ func (s *Storage) stateMachine(join map[uint64]map[uint64]bool, dataDir string, 
 		nodeJoin       bool
 	)
 
-	// 根据分配好的每个节点归属的clusterIds来初始化实例
-	for _, clusterId := range clusterIds {
-		jn, ok = join[clusterId]
+	// 根据分配好的每个节点归属的shardIds来初始化实例
+	for _, shardId := range shardIds {
+		jn, ok = join[shardId]
 		if !ok {
-			return fmt.Errorf("raft clusterId: %d, can't find join config", clusterId)
+			return fmt.Errorf("raft shardId: %d, can't find join config", shardId)
 		}
 
-		nodeJoin, ok = jn[s.cfg.NodeId]
+		nodeJoin, ok = jn[s.cfg.ReplicaId]
 		if !ok {
-			return fmt.Errorf("raft clusterId: %d, nodeId: %d, can't find join config", clusterId, s.cfg.NodeId)
+			return fmt.Errorf("raft shardId: %d, replicaId: %d, can't find join config", shardId, s.cfg.ReplicaId)
 		}
 
-		rc := buildRaftConfig(s.cfg.NodeId, clusterId)
-		clusterDataPath := filepath.Join(dataDir, strconv.Itoa(int(clusterId)))
-		opts := store.PebbleClusterOption{
+		rc := buildRaftConfig(s.cfg.ReplicaId, shardId)
+		shardDataPath := filepath.Join(dataDir, strconv.Itoa(int(shardId)))
+		opts := store.PebbleShardOption{
 			Target:    s.target,
-			NodeId:    s.cfg.NodeId,
-			ClusterId: clusterId,
+			ReplicaId: s.cfg.ReplicaId,
+			ShardId:   shardId,
 		}
-		store, err := store.NewStore(clusterId, clusterDataPath, opts, s.log)
+		store, err := store.NewStore(shardId, shardDataPath, opts, s.log)
 		if err != nil {
 			return err
 		}
 
 		if !nodeJoin {
-			initialMembers, ok = s.cfg.InitialMembers[clusterId]
+			initialMembers, ok = s.cfg.InitialMembers[shardId]
 			if !ok {
-				return fmt.Errorf("raft clusterId: %d, can't find initial members", clusterId)
+				return fmt.Errorf("raft shardId: %d, can't find initial members", shardId)
 			}
 		} else {
 			initialMembers = make(map[uint64]string)
 		}
 
-		stateMachine := newStateMachine(clusterId, s.cfg.NodeId, store)
+		stateMachine := newStateMachine(shardId, s.cfg.ReplicaId, store)
 		err = s.nh.StartOnDiskCluster(initialMembers, nodeJoin, func(_ uint64, _ uint64) sm.IOnDiskStateMachine {
 			return stateMachine
 		}, rc)
@@ -314,8 +313,8 @@ func (s *Storage) stateMachine(join map[uint64]map[uint64]bool, dataDir string, 
 		}
 
 		s.mu.Lock()
-		s.csMap[clusterId] = s.nh.GetNoOPSession(clusterId)
-		s.smMap[clusterId] = store
+		s.csMap[shardId] = s.nh.GetNoOPSession(shardId)
+		s.smMap[shardId] = store
 		s.mu.Unlock()
 	}
 
@@ -360,59 +359,59 @@ func WriteMetadataToFile(dir string, id uint16, meta *RaftMetadata) error {
 	return writeMetadataToFile(filepath.Join(dir, fmt.Sprintf("%s_%d.json", metadataFileName, id)), meta)
 }
 
-// ReadClusterFromFile 集群启动成功，外部管理Storage的程序需要调用读取本地文件的Cluster信息
-func ReadClusterFromFile(dir string, nodeId uint64) (*gossip.RaftClusterMessage, error) {
-	return readClusterFromFile(filepath.Join(dir, fmt.Sprintf("%s_%d.json", clusterFileName, nodeId)))
+// ReadShardFromFile 集群启动成功，外部管理Storage的程序需要调用读取本地文件的shard信息
+func ReadShardFromFile(dir string, replicaId uint64) (*gossip.RaftShardMessage, error) {
+	return readShardFromFile(filepath.Join(dir, fmt.Sprintf("%s_%d.json", shardFileName, replicaId)))
 }
 
 // 更新集群后需要存储到文件
-func (s *Storage) WriteClusterToFile(cluster *gossip.RaftClusterMessage) error {
-	return writeClusterToFile(filepath.Join(s.cfg.StorageDir, fmt.Sprintf("%s_%d.json", clusterFileName, s.cfg.NodeId)), cluster)
+func (s *Storage) WriteShardToFile(shard *gossip.RaftShardMessage) error {
+	return writeShardToFile(filepath.Join(s.cfg.StorageDir, fmt.Sprintf("%s_%d.json", shardFileName, s.cfg.ReplicaId)), shard)
 }
 
 // 更新集群的情况
-func (s *Storage) UpdateClusterMessage(cluster *gossip.RaftClusterMessage) {
-	s.gossip.UpdateClusterMessage(cluster)
+func (s *Storage) UpdateShardMessage(shard *gossip.RaftShardMessage) {
+	s.gossip.UpdateShardMessage(shard)
 }
 
-// clusterIds 统一信任gossip的管理
-func (s *Storage) getClusterIds() []uint64 {
-	cluster := s.gossip.GetClusterMessage()
+// shardIds 统一信任gossip的管理
+func (s *Storage) getShardIds() []uint64 {
+	shard := s.gossip.GetShardMessage()
 
-	return cluster.Targets[s.target].ClusterIds
+	return shard.Targets[s.target].ShardIds
 }
 
-func (s *Storage) getClusterId(hashKey string) uint64 {
+func (s *Storage) getShardId(hashKey string) uint64 {
 	return uint64(crc32.ChecksumIEEE([]byte(hashKey)) % s.cfg.MultiGroupSize)
 }
 
-func (s *Storage) GetNodeId() uint64 {
-	return s.cfg.NodeId
+func (s *Storage) GetReplicaId() uint64 {
+	return s.cfg.ReplicaId
 }
 
 func (s *Storage) GetTarget() string {
 	return s.target
 }
 
-func (s *Storage) clusterMembership(clusterId uint64) (*dragonboat.Membership, error) {
+func (s *Storage) shardMembership(shardId uint64) (*dragonboat.Membership, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), rafttimeout)
 	defer cancel()
-	return s.nh.SyncGetClusterMembership(ctx, clusterId)
+	return s.nh.SyncGetClusterMembership(ctx, shardId)
 }
 
-func (s *Storage) getClusterMembership(clusterId uint64) (*gossip.MemberInfo, error) {
-	membership, err := s.clusterMembership(clusterId)
+func (s *Storage) getShardMembership(shardId uint64) (*gossip.MemberInfo, error) {
+	membership, err := s.shardMembership(shardId)
 	if err != nil {
 		return nil, err
 	}
 
-	leaderID, valid, err := s.nh.GetLeaderID(clusterId)
+	leaderID, valid, err := s.nh.GetLeaderID(shardId)
 	if err != nil {
 		return nil, err
 	}
 
 	return &gossip.MemberInfo{
-		ClusterId:      clusterId,
+		ShardId:        shardId,
 		ConfigChangeId: membership.ConfigChangeID,
 		Nodes:          membership.Nodes,
 		Observers:      membership.Observers,
@@ -423,8 +422,8 @@ func (s *Storage) getClusterMembership(clusterId uint64) (*gossip.MemberInfo, er
 
 func (s *Storage) GetRaftMembership() ([]*gossip.MemberInfo, error) {
 	membership := []*gossip.MemberInfo{}
-	for _, clusterId := range s.getClusterIds() {
-		info, err := s.getClusterMembership(clusterId)
+	for _, shardId := range s.getShardIds() {
+		info, err := s.getShardMembership(shardId)
 		if err != nil {
 			return nil, err
 		}
@@ -455,8 +454,8 @@ func (s *Storage) GetAliveInstances() map[string]bool {
 	return s.gossip.GetAliveInstances()
 }
 
-func (s *Storage) GetClusterMessage() *gossip.RaftClusterMessage {
-	return s.gossip.GetClusterMessage()
+func (s *Storage) GetShardMessage() *gossip.RaftShardMessage {
+	return s.gossip.GetShardMessage()
 }
 
 func (s *Storage) StopRaftNode() {
@@ -478,32 +477,32 @@ func (s *Storage) StopRaftNode() {
 	s.grpcServer.Stop()
 }
 
-func (s *Storage) nodeReady(clusterIds []uint64, ch chan<- struct{}) {
+func (s *Storage) nodeReady(shardIds []uint64, ch chan<- struct{}) {
 	wg := sync.WaitGroup{}
-	wg.Add(len(clusterIds))
-	for _, clusterId := range clusterIds {
-		go func(clusterId uint64) {
-			clusterReady := false
+	wg.Add(len(shardIds))
+	for _, shardId := range shardIds {
+		go func(shardId uint64) {
+			shardReady := false
 			for {
-				_, ready, err := s.nh.GetLeaderID(clusterId)
+				_, ready, err := s.nh.GetLeaderID(shardId)
 				if err == nil && ready {
-					clusterReady = true
+					shardReady = true
 					break
 				}
 
 				if err != nil {
-					log.Println("nodeReady", s.target, clusterId, err.Error())
+					log.Println("nodeReady", s.target, shardId, err.Error())
 				}
 
 				time.Sleep(1000 * time.Millisecond)
 			}
 
-			if clusterReady {
-				log.Println("nodeReady", s.target, clusterId, "ready")
+			if shardReady {
+				log.Println("nodeReady", s.target, shardId, "ready")
 			}
 
 			wg.Done()
-		}(clusterId)
+		}(shardId)
 	}
 
 	wg.Wait()
@@ -511,9 +510,9 @@ func (s *Storage) nodeReady(clusterIds []uint64, ch chan<- struct{}) {
 	ch <- struct{}{}
 }
 
-func initPath(path string, nodeId uint64) (string, string, error) {
-	raftPath := filepath.Join(path, fmt.Sprintf("raft_node%d", nodeId))
-	dataPath := filepath.Join(path, fmt.Sprintf("data_node%d", nodeId))
+func initPath(path string, replicaId uint64) (string, string, error) {
+	raftPath := filepath.Join(path, fmt.Sprintf("raft_node%d", replicaId))
+	dataPath := filepath.Join(path, fmt.Sprintf("data_node%d", replicaId))
 
 	if err := mkdir(raftPath); err != nil {
 		return "", "", err

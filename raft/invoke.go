@@ -2,7 +2,6 @@ package raft
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/rand"
 
@@ -14,10 +13,10 @@ import (
 	"google.golang.org/grpc"
 )
 
-func (s *Storage) moveToCheck(clusterId uint64) bool {
-	clusterIds := s.getClusterIds()
-	for i := 0; i < len(clusterIds); i++ {
-		if clusterId == clusterIds[i] {
+func (s *Storage) moveToCheck(shardId uint64) bool {
+	shardIds := s.getShardIds()
+	for i := 0; i < len(shardIds); i++ {
+		if shardId == shardIds[i] {
 			return false
 		}
 	}
@@ -25,10 +24,10 @@ func (s *Storage) moveToCheck(clusterId uint64) bool {
 	return true
 }
 
-func localAddress(clusterId uint64, alives map[string]bool, rcm *gossip.RaftClusterMessage) (string, error) {
-	nhids, ok := rcm.Clusters[clusterId]
+func localAddress(shardId uint64, alives map[string]bool, rcm *gossip.RaftShardMessage) (string, error) {
+	nhids, ok := rcm.Shards[shardId]
 	if !ok {
-		return "", errors.New(fmt.Sprintf("local clusterId: %d not found raft machine", clusterId))
+		return "", fmt.Errorf("local shardId: %d not found raft machine", shardId)
 	}
 
 	address := ""
@@ -48,18 +47,18 @@ func localAddress(clusterId uint64, alives map[string]bool, rcm *gossip.RaftClus
 	}
 
 	if !alive {
-		return "", errors.New(fmt.Sprintf("local clusterId: %d all machine offline", clusterId))
+		return "", fmt.Errorf("local shardId: %d all machine offline", shardId)
 	}
 
 	return address, nil
 }
 
 // 返回非线性、线性操作的推荐MoveTo地址
-func (s *Storage) moveToAddress(clusterId uint64, linear bool) (int64, string, string, error) {
-	rcm := s.gossip.GetClusterMessage()
+func (s *Storage) moveToAddress(shardId uint64, linear bool) (int64, string, string, error) {
+	rcm := s.gossip.GetShardMessage()
 
 	var (
-		target  gossip.TargetClusterId
+		target  gossip.TargetShardId
 		nhid    string
 		address string
 		ok      bool
@@ -70,7 +69,7 @@ func (s *Storage) moveToAddress(clusterId uint64, linear bool) (int64, string, s
 	alives := s.gossip.GetAliveInstances()
 
 	// 先获取非线性的可用地址
-	address, err = localAddress(clusterId, alives, rcm)
+	address, err = localAddress(shardId, alives, rcm)
 	if err != nil {
 		return 0, "", "", err
 	}
@@ -80,35 +79,35 @@ func (s *Storage) moveToAddress(clusterId uint64, linear bool) (int64, string, s
 	}
 
 	// 线性操作，从membership里确定leader，若leader已经offline，则在集群中随机找一个online的
-	rmm := s.gossip.GetMembershipMessage(clusterId)
+	rmm := s.gossip.GetMembershipMessage(shardId)
 	if rmm == nil {
-		return rcm.Revision, address, "", errors.New(fmt.Sprintf("linear clusterId: %d not found membership", clusterId))
+		return rcm.Revision, address, "", fmt.Errorf("linear shardId: %d not found membership", shardId)
 	}
 
 	nhid, ok = rmm.Nodes[rmm.LeaderId]
 	if !ok {
-		return rcm.Revision, address, "", errors.New(fmt.Sprintf("linear clusterId: %d not found leader node", clusterId))
+		return rcm.Revision, address, "", fmt.Errorf("linear shardId: %d not found leader node", shardId)
 	}
 
 	target, ok = rcm.Targets[nhid]
 	if !ok {
-		return rcm.Revision, address, "", errors.New(fmt.Sprintf("linear clusterId: %d not found leader target", clusterId))
+		return rcm.Revision, address, "", fmt.Errorf("linear shardId: %d not found leader target", shardId)
 	}
 
 	alive := alives[target.GrpcAddr]
 
 	// 如果leader节点已经death
 	if !alive {
-		return rcm.Revision, address, "", errors.New(fmt.Sprintf("linear clusterId: %d leader death", clusterId))
+		return rcm.Revision, address, "", fmt.Errorf("linear shardId: %d leader death", shardId)
 	}
 
 	return rcm.Revision, address, target.GrpcAddr, nil
 }
 
-// moveTo的时候可以直接传clusterId代替传hashkey，因为clusterId的算法都是一样的，
-// 不可能出现不同的节点计算出的clusterId不一致的情况
-func (s *Storage) moveToInvoke(clusterId uint64, cmd command.RaftCommand) ([]byte, error) {
-	gcall := func(ctx context.Context, clusterId uint64, revision int64,
+// moveTo的时候可以直接传shardId代替传hashkey，因为shardId的算法都是一样的，
+// 不可能出现不同的节点计算出的shardId不一致的情况
+func (s *Storage) moveToInvoke(shardId uint64, cmd command.RaftCommand) ([]byte, error) {
+	gcall := func(ctx context.Context, shardId uint64, revision int64,
 		addr string, b []byte) (*pb.MoveToResponse, error) {
 
 		// 1. grpc call addr
@@ -122,9 +121,9 @@ func (s *Storage) moveToInvoke(clusterId uint64, cmd command.RaftCommand) ([]byt
 		client := pb.NewMoveToClient(conn)
 
 		resp, err := client.MoveToInvoke(ctx, &pb.MoveToCommand{
-			ClusterId: clusterId,
-			Revision:  revision,
-			Cmd:       b,
+			ShardId:  shardId,
+			Revision: revision,
+			Cmd:      b,
 		}, []grpc.CallOption{
 			grpc.WaitForReady(false),
 		}...)
@@ -138,9 +137,9 @@ func (s *Storage) moveToInvoke(clusterId uint64, cmd command.RaftCommand) ([]byt
 	}
 
 	retry := false
-	revision, localAddr, linearAddr, err := s.moveToAddress(clusterId, cmd.Linear())
+	revision, localAddr, linearAddr, err := s.moveToAddress(shardId, cmd.Linear())
 	if err != nil {
-		s.log.Warn("[raftstorage] [invoke] [MoveToInvoke]",
+		s.log.Warn("raft storage invoke MoveToInvoke",
 			zap.String("target", s.target),
 			zap.String("localAddr", localAddr),
 			zap.String("linearAddr", linearAddr),
@@ -159,7 +158,7 @@ func (s *Storage) moveToInvoke(clusterId uint64, cmd command.RaftCommand) ([]byt
 
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), moveToTimeout)
-		resp, err := gcall(ctx, clusterId, revision, addr, b)
+		resp, err := gcall(ctx, shardId, revision, addr, b)
 		cancel()
 		if err != nil {
 			return nil, err
@@ -173,7 +172,7 @@ func (s *Storage) moveToInvoke(clusterId uint64, cmd command.RaftCommand) ([]byt
 			break
 		}
 
-		// 只有当前cluster集群分配的版本号 <= MoveTo返回的版本号，才使用MoveTo推荐的地址去重试
+		// 只有当前shard集群分配的版本号 <= MoveTo返回的版本号，才使用MoveTo推荐的地址去重试
 		// 并且只保证重试一次
 		if revision <= resp.Revision {
 			retry = true
@@ -187,8 +186,8 @@ func (s *Storage) moveToInvoke(clusterId uint64, cmd command.RaftCommand) ([]byt
 	return nil, moveToErr
 }
 
-func (s *Storage) raftNodeInvoke(nodeId, clusterId uint64, target string, op uint32, linear bool) ([]byte, error) {
-	gcall := func(ctx context.Context, nodeId, clusterId uint64, target string, op uint32,
+func (s *Storage) raftNodeInvoke(replicaId, shardId uint64, target string, op uint32, linear bool) ([]byte, error) {
+	gcall := func(ctx context.Context, replicaId, shardId uint64, target string, op uint32,
 		revision int64, addr string, linear bool) (*pb.MoveToResponse, error) {
 		// 1. grpc call addr
 		conn, err := grpc.DialContext(ctx, addr, []grpc.DialOption{
@@ -203,8 +202,8 @@ func (s *Storage) raftNodeInvoke(nodeId, clusterId uint64, target string, op uin
 		client := pb.NewMoveToClient(conn)
 
 		resp, err := client.RaftNodeInvoke(ctx, &pb.RaftInvokeOp{
-			NodeId:    nodeId,
-			ClusterId: clusterId,
+			ReplicaId: replicaId,
+			ShardId:   shardId,
 			Target:    target,
 			Op:        op,
 			Linear:    linear,
@@ -218,9 +217,9 @@ func (s *Storage) raftNodeInvoke(nodeId, clusterId uint64, target string, op uin
 
 	retry := false
 
-	revision, localAddr, linearAddr, err := s.moveToAddress(clusterId, linear)
+	revision, localAddr, linearAddr, err := s.moveToAddress(shardId, linear)
 	if err != nil {
-		s.log.Warn("[raftstorage] [invoke] [RaftNodeInvoke]",
+		s.log.Warn("raft storage invoke RaftNodeInvoke",
 			zap.String("target", s.target),
 			zap.String("localAddr", localAddr),
 			zap.String("linearAddr", linearAddr),
@@ -241,7 +240,7 @@ func (s *Storage) raftNodeInvoke(nodeId, clusterId uint64, target string, op uin
 		ctx, cancel := context.WithTimeout(context.Background(), moveToTimeout)
 		resp, err := gcall(
 			ctx,
-			nodeId, clusterId, target, op,
+			replicaId, shardId, target, op,
 			revision, addr, linear,
 		)
 		cancel()
@@ -257,7 +256,7 @@ func (s *Storage) raftNodeInvoke(nodeId, clusterId uint64, target string, op uin
 			break
 		}
 
-		// 只有当前cluster集群分配的版本号 <= MoveTo返回的版本号，才使用MoveTo推荐的地址去重试
+		// 只有当前shard集群分配的版本号 <= MoveTo返回的版本号，才使用MoveTo推荐的地址去重试
 		// 并且只保证重试一次
 		if revision <= resp.Revision {
 			retry = true
@@ -271,21 +270,21 @@ func (s *Storage) raftNodeInvoke(nodeId, clusterId uint64, target string, op uin
 	return nil, moveToErr
 }
 
-func (s *Storage) invoke(clusterId uint64, cmd command.RaftCommand) ([]byte, error) {
+func (s *Storage) invoke(shardId uint64, cmd command.RaftCommand) ([]byte, error) {
 	var err error
 	if cmd.Linear() {
 		s.mu.RLock()
-		session, ok := s.csMap[clusterId]
+		session, ok := s.csMap[shardId]
 		s.mu.RUnlock()
 		if !ok {
 			return nil, sessionNotFound
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), rafttimeout)
-		err = cmd.RaftInvoke(ctx, s.nh, clusterId, session)
+		err = cmd.RaftInvoke(ctx, s.nh, shardId, session)
 		cancel()
 	} else {
 		s.mu.RLock()
-		store, ok := s.smMap[clusterId]
+		store, ok := s.smMap[shardId]
 		s.mu.RUnlock()
 
 		if !ok {

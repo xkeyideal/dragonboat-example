@@ -33,8 +33,8 @@ func (c *SearchCommand) GetType() CommandType {
 	return SEARCH
 }
 
-func (c *SearchCommand) RaftInvoke(ctx context.Context, nh *dragonboat.NodeHost, clusterId uint64, _ *client.Session) error {
-	result, err := syncRead(ctx, nh, clusterId, c)
+func (c *SearchCommand) RaftInvoke(ctx context.Context, nh *dragonboat.NodeHost, shardId uint64, _ *client.Session) error {
+	result, err := syncRead(ctx, nh, shardId, c)
 	if err != nil {
 		return err
 	}

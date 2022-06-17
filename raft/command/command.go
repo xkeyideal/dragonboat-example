@@ -56,7 +56,7 @@ type RaftCommand interface {
 	GetType() CommandType
 
 	// 线性调用的方法
-	RaftInvoke(ctx context.Context, nh *dragonboat.NodeHost, clusterId uint64, session *client.Session) error
+	RaftInvoke(ctx context.Context, nh *dragonboat.NodeHost, shardId uint64, session *client.Session) error
 
 	// 本地调用的方法
 	LocalInvoke(s *store.Store, opts ...*WriteOptions) error
@@ -128,13 +128,13 @@ func syncWrite(ctx context.Context, nh *dragonboat.NodeHost, session *client.Ses
 	return result.Data, nil
 }
 
-func syncRead(ctx context.Context, nh *dragonboat.NodeHost, clusterId uint64, cmd RaftCommand) ([]byte, error) {
+func syncRead(ctx context.Context, nh *dragonboat.NodeHost, shardId uint64, cmd RaftCommand) ([]byte, error) {
 	b, err := EncodeCmd(cmd)
 	if err != nil {
 		return nil, err
 	}
 
-	result, err := nh.SyncRead(ctx, clusterId, b)
+	result, err := nh.SyncRead(ctx, shardId, b)
 	if err != nil {
 		return nil, err
 	}

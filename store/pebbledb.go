@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/xkeyideal/dragonboat-example/v3/internal/vfs"
 
@@ -12,10 +11,10 @@ import (
 	"go.uber.org/zap"
 )
 
-type PebbleClusterOption struct {
+type PebbleShardOption struct {
 	Target    string
-	NodeId    uint64
-	ClusterId uint64
+	ReplicaId uint64
+	ShardId   uint64
 }
 
 type PebbleDBConfig struct {
@@ -64,7 +63,7 @@ type pebbleLogger struct {
 var _ pebble.Logger = (*pebbleLogger)(nil)
 
 func (pl pebbleLogger) Infof(format string, args ...interface{}) {
-	pl.log.Info("[raftstorage] [pebbledb] [systemlog]",
+	pl.log.Info("raft storage pebbledb",
 		append(pl.fields,
 			zap.String("msg", fmt.Sprintf(format, args...)),
 		)...,
@@ -72,14 +71,14 @@ func (pl pebbleLogger) Infof(format string, args ...interface{}) {
 }
 
 func (pl pebbleLogger) Fatalf(format string, args ...interface{}) {
-	pl.log.Error("[raftstorage] [pebbledb] [systemlog]",
+	pl.log.Error("raft storage pebbledb",
 		append(pl.fields,
 			zap.String("msg", fmt.Sprintf(format, args...)),
 		)...,
 	)
 }
 
-func openPebbleDB(config PebbleDBConfig, dir string, popts PebbleClusterOption, log *zap.Logger) (*pebble.DB, error) {
+func openPebbleDB(config PebbleDBConfig, dir string, popts PebbleShardOption, log *zap.Logger) (*pebble.DB, error) {
 	blockSize := config.KVBlockSize
 	levelSizeMultiplier := config.KVTargetFileSizeMultiplier
 	sz := config.KVTargetFileSizeBase
@@ -107,8 +106,8 @@ func openPebbleDB(config PebbleDBConfig, dir string, popts PebbleClusterOption, 
 
 	fields := []zap.Field{
 		zap.String("target", popts.Target),
-		zap.Uint64("nodeId", popts.NodeId),
-		zap.Uint64("clusterId", popts.ClusterId),
+		zap.Uint64("replicaId", popts.ReplicaId),
+		zap.Uint64("shardId", popts.ShardId),
 	}
 
 	cache := pebble.NewCache(config.KVLRUCacheSize)
@@ -166,37 +165,33 @@ func openPebbleDB(config PebbleDBConfig, dir string, popts PebbleClusterOption, 
 
 type eventListener struct {
 	log    *zap.Logger
-	opts   PebbleClusterOption
+	opts   PebbleShardOption
 	fields []zap.Field
 }
 
 // BackgroundError is invoked whenever an error occurs during a background
 // operation such as flush or compaction.
 func (l *eventListener) BackgroundError(err error) {
-	l.log.Error("[raftstorage] [pebbledb] [BackgroundError]", append(l.fields, zap.Error(err))...)
+	l.log.Error("raft storage pebbledb BackgroundError", append(l.fields, zap.Error(err))...)
 }
 
 // CompactionBegin is invoked after the inputs to a compaction have been
 // determined, but before the compaction has produced any output.
 func (l *eventListener) CompactionBegin(info pebble.CompactionInfo) {
-	msg := strings.ReplaceAll(info.String(), "[", "(")
-	msg = strings.ReplaceAll(msg, "]", ")")
 	if info.Err != nil {
-		l.log.Error("[raftstorage] [pebbledb] [CompactionBegin]", append(l.fields, zap.String("info", msg))...)
+		l.log.Error("raft storage pebbledb CompactionBegin", append(l.fields, zap.String("info", info.String()))...)
 	} else {
-		l.log.Info("[raftstorage] [pebbledb] [CompactionBegin]", append(l.fields, zap.String("info", msg))...)
+		l.log.Info("raft storage pebbledb CompactionBegin", append(l.fields, zap.String("info", info.String()))...)
 	}
 }
 
 // CompactionEnd is invoked after a compaction has completed and the result
 // has been installed.
 func (l *eventListener) CompactionEnd(info pebble.CompactionInfo) {
-	msg := strings.ReplaceAll(info.String(), "[", "(")
-	msg = strings.ReplaceAll(msg, "]", ")")
 	if info.Err != nil {
-		l.log.Error("[raftstorage] [pebbledb] [CompactionEnd]", append(l.fields, zap.String("info", msg))...)
+		l.log.Error("raft storage pebbledb CompactionEnd]", append(l.fields, zap.String("info", info.String()))...)
 	} else {
-		l.log.Info("[raftstorage] [pebbledb] [CompactionEnd]", append(l.fields, zap.String("info", msg))...)
+		l.log.Info("raft storage pebbledb CompactionEnd]", append(l.fields, zap.String("info", info.String()))...)
 	}
 }
 
@@ -204,121 +199,101 @@ func (l *eventListener) CompactionEnd(info pebble.CompactionInfo) {
 // with a disk health checking vfs.FS (see vfs.DefaultWithDiskHealthChecks)
 // is observed to exceed the specified disk slowness threshold duration.
 func (l *eventListener) DiskSlow(info pebble.DiskSlowInfo) {
-	l.log.Error("[raftstorage] [pebbledb] [DiskSlow]", append(l.fields, zap.String("info", info.String()))...)
+	l.log.Error("raft storage pebbledb DiskSlow", append(l.fields, zap.String("info", info.String()))...)
 }
 
 // FlushBegin is invoked after the inputs to a flush have been determined,
 // but before the flush has produced any output.
 func (l *eventListener) FlushBegin(info pebble.FlushInfo) {
-	msg := strings.ReplaceAll(info.String(), "[", "(")
-	msg = strings.ReplaceAll(msg, "]", ")")
 	if info.Err != nil {
-		l.log.Error("[raftstorage] [pebbledb] [FlushBegin]", append(l.fields, zap.String("info", msg))...)
+		l.log.Error("raft storage pebbledb FlushBegin", append(l.fields, zap.String("info", info.String()))...)
 	} else {
-		l.log.Info("[raftstorage] [pebbledb] [FlushBegin]", append(l.fields, zap.String("info", msg))...)
+		l.log.Info("raft storage pebbledb FlushBegin", append(l.fields, zap.String("info", info.String()))...)
 	}
 }
 
 // FlushEnd is invoked after a flush has complated and the result has been
 // installed.
 func (l *eventListener) FlushEnd(info pebble.FlushInfo) {
-	msg := strings.ReplaceAll(info.String(), "[", "(")
-	msg = strings.ReplaceAll(msg, "]", ")")
 	if info.Err != nil {
-		l.log.Error("[raftstorage] [pebbledb] [FlushEnd]", append(l.fields, zap.String("info", msg))...)
+		l.log.Error("raft storage pebbledb FlushEnd", append(l.fields, zap.String("info", info.String()))...)
 	} else {
-		l.log.Info("[raftstorage] [pebbledb] [FlushEnd]", append(l.fields, zap.String("info", msg))...)
+		l.log.Info("raft storage pebbledb FlushEnd", append(l.fields, zap.String("info", info.String()))...)
 	}
 }
 
 // ManifestCreated is invoked after a manifest has been created.
 func (l *eventListener) ManifestCreated(info pebble.ManifestCreateInfo) {
-	msg := strings.ReplaceAll(info.String(), "[", "(")
-	msg = strings.ReplaceAll(msg, "]", ")")
 	if info.Err != nil {
-		l.log.Error("[raftstorage] [pebbledb] [ManifestCreated]", append(l.fields, zap.String("info", msg))...)
+		l.log.Error("raft storage pebbledb ManifestCreated", append(l.fields, zap.String("info", info.String()))...)
 	} else {
-		l.log.Info("[raftstorage] [pebbledb] [ManifestCreated]", append(l.fields, zap.String("info", msg))...)
+		l.log.Info("raft storage pebbledb ManifestCreated", append(l.fields, zap.String("info", info.String()))...)
 	}
 }
 
 // ManifestDeleted is invoked after a manifest has been deleted.
 func (l *eventListener) ManifestDeleted(info pebble.ManifestDeleteInfo) {
-	msg := strings.ReplaceAll(info.String(), "[", "(")
-	msg = strings.ReplaceAll(msg, "]", ")")
 	if info.Err != nil {
-		l.log.Error("[raftstorage] [pebbledb] [ManifestDeleted]", append(l.fields, zap.String("info", msg))...)
+		l.log.Error("raft storage pebbledb ManifestDeleted", append(l.fields, zap.String("info", info.String()))...)
 	} else {
-		l.log.Info("[raftstorage] [pebbledb] [ManifestDeleted]", append(l.fields, zap.String("info", msg))...)
+		l.log.Info("raft storage pebbledb ManifestDeleted", append(l.fields, zap.String("info", info.String()))...)
 	}
 }
 
 // TableCreated is invoked when a table has been created.
 func (l *eventListener) TableCreated(info pebble.TableCreateInfo) {
-	msg := strings.ReplaceAll(info.String(), "[", "(")
-	msg = strings.ReplaceAll(msg, "]", ")")
-	l.log.Info("[raftstorage] [pebbledb] [TableCreated]", append(l.fields, zap.String("info", msg))...)
+	l.log.Info("raft storage pebbledb TableCreated", append(l.fields, zap.String("info", info.String()))...)
 }
 
 // TableDeleted is invoked after a table has been deleted.
 func (l *eventListener) TableDeleted(info pebble.TableDeleteInfo) {
-	msg := strings.ReplaceAll(info.String(), "[", "(")
-	msg = strings.ReplaceAll(msg, "]", ")")
 	if info.Err != nil {
-		l.log.Error("[raftstorage] [pebbledb] [TableDeleted]", append(l.fields, zap.String("info", msg))...)
+		l.log.Error("raft storage pebbledb TableDeleted", append(l.fields, zap.String("info", info.String()))...)
 	} else {
-		l.log.Info("[raftstorage] [pebbledb] [TableDeleted]", append(l.fields, zap.String("info", msg))...)
+		l.log.Info("raft storage pebbledb TableDeleted", append(l.fields, zap.String("info", info.String()))...)
 	}
 }
 
 // TableIngested is invoked after an externally created table has been
 // ingested via a call to DB.Ingest().
 func (l *eventListener) TableIngested(info pebble.TableIngestInfo) {
-	msg := strings.ReplaceAll(info.String(), "[", "(")
-	msg = strings.ReplaceAll(msg, "]", ")")
 	if info.Err != nil {
-		l.log.Error("[raftstorage] [pebbledb] [TableIngested]", append(l.fields, zap.String("info", msg))...)
+		l.log.Error("raft storage pebbledb TableIngested", append(l.fields, zap.String("info", info.String()))...)
 	} else {
-		l.log.Info("[raftstorage] [pebbledb] [TableIngested]", append(l.fields, zap.String("info", msg))...)
+		l.log.Info("raft storage pebbledb TableIngested", append(l.fields, zap.String("info", info.String()))...)
 	}
 }
 
 // TableStatsLoaded is invoked at most once, when the table stats
 // collector has loaded statistics for all tables that existed at Open.
 func (l *eventListener) TableStatsLoaded(info pebble.TableStatsInfo) {
-	msg := strings.ReplaceAll(info.String(), "[", "(")
-	msg = strings.ReplaceAll(msg, "]", ")")
-	l.log.Info("[raftstorage] [pebbledb] [TableStatsLoaded]", append(l.fields, zap.String("info", msg))...)
+	l.log.Info("raft storage pebbledb TableStatsLoaded", append(l.fields, zap.String("info", info.String()))...)
 }
 
 // WALCreated is invoked after a WAL has been created.
 func (l *eventListener) WALCreated(info pebble.WALCreateInfo) {
-	msg := strings.ReplaceAll(info.String(), "[", "(")
-	msg = strings.ReplaceAll(msg, "]", ")")
 	if info.Err != nil {
-		l.log.Error("[raftstorage] [pebbledb] [WALCreated]", append(l.fields, zap.String("info", msg))...)
+		l.log.Error("raft storage pebbledb WALCreated", append(l.fields, zap.String("info", info.String()))...)
 	} else {
-		l.log.Info("[raftstorage] [pebbledb] [WALCreated]", append(l.fields, zap.String("info", msg))...)
+		l.log.Info("raft storage pebbledb WALCreated", append(l.fields, zap.String("info", info.String()))...)
 	}
 }
 
 // WALDeleted is invoked after a WAL has been deleted.
 func (l *eventListener) WALDeleted(info pebble.WALDeleteInfo) {
-	msg := strings.ReplaceAll(info.String(), "[", "(")
-	msg = strings.ReplaceAll(msg, "]", ")")
 	if info.Err != nil {
-		l.log.Error("[raftstorage] [pebbledb] [WALDeleted]", append(l.fields, zap.String("info", msg))...)
+		l.log.Error("raft storage pebbledb WALDeleted", append(l.fields, zap.String("info", info.String()))...)
 	} else {
-		l.log.Info("[raftstorage] [pebbledb] [WALDeleted]", append(l.fields, zap.String("info", msg))...)
+		l.log.Info("raft storage pebbledb WALDeleted", append(l.fields, zap.String("info", info.String()))...)
 	}
 }
 
 // WriteStallBegin is invoked when writes are intentionally delayed.
 func (l *eventListener) WriteStallBegin(info pebble.WriteStallBeginInfo) {
-	l.log.Warn("[raftstorage] [pebbledb] [WriteStallBegin]", append(l.fields, zap.String("info", info.String()))...)
+	l.log.Warn("raft storage pebbledb WriteStallBegin", append(l.fields, zap.String("info", info.String()))...)
 }
 
 // WriteStallEnd is invoked when delayed writes are released.
 func (l *eventListener) WriteStallEnd() {
-	l.log.Warn("[raftstorage] [pebbledb] [WriteStallEnd]", l.fields...)
+	l.log.Warn("raft storage pebbledb WriteStallEnd", l.fields...)
 }

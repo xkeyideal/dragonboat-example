@@ -66,7 +66,7 @@ var (
 		"127.0.0.1:21004": 24004,
 	}
 
-	// 同步cluster信息的gossip
+	// 同步shard信息的gossip
 	gossipAddrs = []string{
 		"127.0.0.1:23000",
 		"127.0.0.1:23001",
@@ -75,12 +75,12 @@ var (
 		"127.0.0.1:23004",
 	}
 
-	// key: addr, val: clusterIds
-	nodeMap map[string][]uint64
+	// key: addr, val: shardIds
+	replicaMap map[string][]uint64
 )
 
 func init2() {
-	nodeMap = generateRaftClusters()
+	replicaMap = generateRaftShards()
 }
 
 func newTestStorage(addr string, cfg *raft.RaftConfig) *raft.Storage {
@@ -92,9 +92,9 @@ func newTestStorage(addr string, cfg *raft.RaftConfig) *raft.Storage {
 	return s
 }
 
-func newGossipStorage() ([]*raft.Storage, *gossip.RaftClusterMessage) {
+func newGossipStorage() ([]*raft.Storage, *gossip.RaftShardMessage) {
 	init2()
-	initRcm := initClusterMessage(nodeMap)
+	initRcm := initShardMessage(replicaMap)
 	// initialMembers := initialMembers(true)
 
 	storages := []*raft.Storage{}
@@ -102,13 +102,13 @@ func newGossipStorage() ([]*raft.Storage, *gossip.RaftClusterMessage) {
 	wg.Add(len(raftAddrs))
 	for i, addr := range raftAddrs {
 		go func(i int, addr string) {
-			nodeId := addr2RaftNodeID(addr)
+			replicaId := addr2RaftReplicaID(addr)
 			cfg := &raft.RaftConfig{
 				LogDir:         logDir,
 				LogLevel:       level,
 				HostIP:         hostIP,
-				NodeId:         nodeId,
-				ClusterIds:     nodeMap[addr],
+				ReplicaId:      replicaId,
+				ShardIds:       replicaMap[addr],
 				RaftAddr:       addr,
 				GrpcPort:       grpcPorts[addr],
 				StorageDir:     storageDir,
@@ -145,13 +145,13 @@ func TestStorageByGossip(t *testing.T) {
 	storages, initRcm := newGossipStorage()
 
 	sort.Slice(storages, func(i, j int) bool {
-		return storages[i].GetNodeId() < storages[j].GetNodeId()
+		return storages[i].GetReplicaId() < storages[j].GetReplicaId()
 	})
 
 	t.Logf("==================storage start over======================")
 
 	for _, s := range storages {
-		rcm, err := raft.ReadClusterFromFile(storageDir, s.GetNodeId())
+		rcm, err := raft.ReadShardFromFile(storageDir, s.GetReplicaId())
 		if err != nil {
 			if err == os.ErrNotExist {
 				rcm = initRcm
@@ -160,8 +160,8 @@ func TestStorageByGossip(t *testing.T) {
 			}
 		}
 
-		s.UpdateClusterMessage(rcm)
-		//s.WriteClusterToFile(rcm)
+		s.UpdateShardMessage(rcm)
+		//s.WriteShardToFile(rcm)
 	}
 
 	//t.Log(storages[2])
@@ -203,25 +203,25 @@ func TestStorageByGossip(t *testing.T) {
 	t.Logf("==================storage test get put down======================")
 
 	// 测试moveTo查询
-	clusterId := getClusterId("test_raft_put_command")
-	var moveToNodeId uint64 = 0
-	for addr, clusterIds := range nodeMap {
+	shardId := getShardId("test_raft_put_command")
+	var moveToReplicaId uint64 = 0
+	for addr, shardIds := range replicaMap {
 		ok := true
-		for _, id := range clusterIds {
-			if id == clusterId {
+		for _, id := range shardIds {
+			if id == shardId {
 				ok = false
 				break
 			}
 		}
 
 		if ok {
-			moveToNodeId = addr2RaftNodeID(addr)
+			moveToReplicaId = addr2RaftReplicaID(addr)
 		}
 	}
 
 	var moveToStorage *raft.Storage
 	for _, s := range storages {
-		if s.GetNodeId() == moveToNodeId {
+		if s.GetReplicaId() == moveToReplicaId {
 			moveToStorage = s
 			break
 		}
@@ -256,13 +256,13 @@ func TestRaftNodeJoin(t *testing.T) {
 	storages, initRcm := newGossipStorage()
 
 	sort.Slice(storages, func(i, j int) bool {
-		return storages[i].GetNodeId() < storages[j].GetNodeId()
+		return storages[i].GetReplicaId() < storages[j].GetReplicaId()
 	})
 
 	t.Logf("==================storage start over======================")
 
 	for _, s := range storages {
-		rcm, err := raft.ReadClusterFromFile(storageDir, s.GetNodeId())
+		rcm, err := raft.ReadShardFromFile(storageDir, s.GetReplicaId())
 		if err != nil {
 			if err == os.ErrNotExist {
 				rcm = initRcm
@@ -271,7 +271,7 @@ func TestRaftNodeJoin(t *testing.T) {
 			}
 		}
 
-		s.UpdateClusterMessage(rcm)
+		s.UpdateShardMessage(rcm)
 	}
 
 	time.Sleep(5 * time.Second)
@@ -279,22 +279,22 @@ func TestRaftNodeJoin(t *testing.T) {
 	t.Logf("==================storage down======================")
 
 	// 取出待测试的storages[1]的集群分部情况
-	s1Cluster := storages[1].GetClusterMessage()
-	joinClusterIds := []uint64{}
+	s1Shard := storages[1].GetShardMessage()
+	joinshardIds := []uint64{}
 	set := make(map[uint64]struct{})
-	t.Log(storages[1].GetTarget(), s1Cluster.Targets[storages[1].GetTarget()].ClusterIds)
-	for _, clusterId := range s1Cluster.Targets[storages[1].GetTarget()].ClusterIds {
-		set[clusterId] = struct{}{}
+	t.Log(storages[1].GetTarget(), s1Shard.Targets[storages[1].GetTarget()].ShardIds)
+	for _, shardId := range s1Shard.Targets[storages[1].GetTarget()].ShardIds {
+		set[shardId] = struct{}{}
 	}
 
-	// 将没加入的clusterIds全部加入storages[1]
+	// 将没加入的shardIds全部加入storages[1]
 	for i := 0; i < groupNumber; i++ {
 		if _, ok := set[uint64(i)]; !ok {
-			joinClusterIds = append(joinClusterIds, uint64(i))
+			joinshardIds = append(joinshardIds, uint64(i))
 		}
 	}
 
-	t.Log("args ...interface{}", s1Cluster.Revision, joinClusterIds)
+	t.Log("args ...interface{}", s1Shard.Revision, joinshardIds)
 
 	// beforeMs, err := storages[1].GetRaftMembership()
 	// if err != nil {
@@ -305,31 +305,31 @@ func TestRaftNodeJoin(t *testing.T) {
 	// t.Log("before membership: ", string(b))
 
 	// 随便找个节点，执行Join操作, 顺带也能执行moveTo
-	err := storages[0].AddRaftNode(storages[1].GetNodeId(), storages[1].GetTarget(), joinClusterIds)
+	err := storages[0].AddRaftNode(storages[1].GetReplicaId(), storages[1].GetTarget(), joinshardIds)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	storages[1].ChangeRaftNodeClusterIds(true, joinClusterIds)
+	storages[1].ChangeRaftNodeShardIds(true, joinshardIds)
 
 	time.Sleep(2 * time.Second)
 
 	// 重新拼装storages[1]的集群分配配置
-	newCluster := DeepCopy(s1Cluster).(*gossip.RaftClusterMessage)
+	newShard := DeepCopy(s1Shard).(*gossip.RaftShardMessage)
 
-	newCluster.Revision += 1
-	target := newCluster.Targets[storages[1].GetTarget()]
-	target.ClusterIds = append(target.ClusterIds, joinClusterIds...)
-	newCluster.Targets[storages[1].GetTarget()] = target
-	for _, clusterId := range joinClusterIds {
-		newCluster.Clusters[clusterId] = append(newCluster.Clusters[clusterId], storages[1].GetTarget())
-		join := newCluster.Join[clusterId]
-		join[storages[1].GetNodeId()] = true
-		newCluster.Join[clusterId] = join
+	newShard.Revision += 1
+	target := newShard.Targets[storages[1].GetTarget()]
+	target.ShardIds = append(target.ShardIds, joinshardIds...)
+	newShard.Targets[storages[1].GetTarget()] = target
+	for _, shardId := range joinshardIds {
+		newShard.Shards[shardId] = append(newShard.Shards[shardId], storages[1].GetTarget())
+		join := newShard.Join[shardId]
+		join[storages[1].GetReplicaId()] = true
+		newShard.Join[shardId] = join
 	}
 
 	// 调用接口，更新集群分配配置
-	storages[1].UpdateClusterMessage(newCluster)
+	storages[1].UpdateShardMessage(newShard)
 
 	// sleep 一定时间，便于gossip数据同步收敛
 	time.Sleep(5 * time.Second)
@@ -343,10 +343,10 @@ func TestRaftNodeJoin(t *testing.T) {
 	// t.Log("after membership: ", string(b))
 
 	// 此处测试如果不通过，没影响，需要根据gossip的收敛速度来的，目前的收敛速度是秒级
-	s2Cluster := storages[2].GetClusterMessage()
-	t.Log("GetClusterMessage", storages[2].GetNodeId(), storages[2].GetTarget(), newCluster.Revision, s2Cluster.Revision)
-	if s2Cluster.Revision != newCluster.Revision {
-		t.Fatalf("cluster config unexpected, [%d - %d]", s2Cluster.Revision, newCluster.Revision)
+	s2Shard := storages[2].GetShardMessage()
+	t.Log("GetShardMessage", storages[2].GetReplicaId(), storages[2].GetTarget(), newShard.Revision, s2Shard.Revision)
+	if s2Shard.Revision != newShard.Revision {
+		t.Fatalf("shard config unexpected, [%d - %d]", s2Shard.Revision, newShard.Revision)
 	}
 
 	t.Logf("==================storage join test down======================")
@@ -365,13 +365,13 @@ func TestRaftNodeLeave(t *testing.T) {
 	storages, initRcm := newGossipStorage()
 
 	sort.Slice(storages, func(i, j int) bool {
-		return storages[i].GetNodeId() < storages[j].GetNodeId()
+		return storages[i].GetReplicaId() < storages[j].GetReplicaId()
 	})
 
 	t.Logf("==================storage start over======================")
 
 	for _, s := range storages {
-		rcm, err := raft.ReadClusterFromFile(storageDir, s.GetNodeId())
+		rcm, err := raft.ReadShardFromFile(storageDir, s.GetReplicaId())
 		if err != nil {
 			if err == os.ErrNotExist {
 				rcm = initRcm
@@ -380,7 +380,7 @@ func TestRaftNodeLeave(t *testing.T) {
 			}
 		}
 
-		s.UpdateClusterMessage(rcm)
+		s.UpdateShardMessage(rcm)
 	}
 
 	time.Sleep(5 * time.Second)
@@ -388,16 +388,16 @@ func TestRaftNodeLeave(t *testing.T) {
 	t.Logf("==================storage down======================")
 
 	// 取出待测试的storages[1]的集群分部情况
-	s1Cluster := storages[1].GetClusterMessage()
-	leaveClusterIds := []uint64{}
-	t.Log(storages[1].GetTarget(), s1Cluster.Targets[storages[1].GetTarget()].ClusterIds)
-	for _, clusterId := range s1Cluster.Targets[storages[1].GetTarget()].ClusterIds {
-		if clusterId%3 == 0 {
-			leaveClusterIds = append(leaveClusterIds, clusterId)
+	s1Shard := storages[1].GetShardMessage()
+	leaveshardIds := []uint64{}
+	t.Log(storages[1].GetTarget(), s1Shard.Targets[storages[1].GetTarget()].ShardIds)
+	for _, shardId := range s1Shard.Targets[storages[1].GetTarget()].ShardIds {
+		if shardId%3 == 0 {
+			leaveshardIds = append(leaveshardIds, shardId)
 		}
 	}
 
-	t.Log("args ...interface{}", s1Cluster.Revision, leaveClusterIds)
+	t.Log("args ...interface{}", s1Shard.Revision, leaveshardIds)
 
 	// beforeMs, err := storages[1].GetRaftMembership()
 	// if err != nil {
@@ -408,57 +408,57 @@ func TestRaftNodeLeave(t *testing.T) {
 	// t.Log("before membership: ", string(b))
 
 	// 随便找个节点，执行Leave操作, 顺带也能执行moveTo
-	err := storages[0].RemoveRaftNode(storages[1].GetNodeId(), leaveClusterIds)
+	err := storages[0].RemoveRaftNode(storages[1].GetReplicaId(), leaveshardIds)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	storages[1].ChangeRaftNodeClusterIds(false, leaveClusterIds)
+	storages[1].ChangeRaftNodeShardIds(false, leaveshardIds)
 
 	time.Sleep(2 * time.Second)
 
 	// 重新拼装storages[1]的集群分配配置
-	newCluster := DeepCopy(s1Cluster).(*gossip.RaftClusterMessage)
+	newShard := DeepCopy(s1Shard).(*gossip.RaftShardMessage)
 
-	newCluster.Revision += 1
-	target := newCluster.Targets[storages[1].GetTarget()]
+	newShard.Revision += 1
+	target := newShard.Targets[storages[1].GetTarget()]
 
 	set := make(map[uint64]struct{})
-	for _, clusterId := range target.ClusterIds {
-		set[clusterId] = struct{}{}
+	for _, shardId := range target.ShardIds {
+		set[shardId] = struct{}{}
 	}
-	for _, clusterId := range leaveClusterIds {
-		delete(set, clusterId)
+	for _, shardId := range leaveshardIds {
+		delete(set, shardId)
 	}
 
-	clusterIds := []uint64{}
-	for clusterId := range set {
-		clusterIds = append(clusterIds, clusterId)
+	shardIds := []uint64{}
+	for shardId := range set {
+		shardIds = append(shardIds, shardId)
 	}
-	target.ClusterIds = clusterIds
-	newCluster.Targets[storages[1].GetTarget()] = target
-	for _, clusterId := range leaveClusterIds {
+	target.ShardIds = shardIds
+	newShard.Targets[storages[1].GetTarget()] = target
+	for _, shardId := range leaveshardIds {
 		targets := []string{}
-		for _, target := range newCluster.Clusters[clusterId] {
+		for _, target := range newShard.Shards[shardId] {
 			if target == storages[1].GetTarget() {
 				continue
 			}
 			targets = append(targets, target)
 		}
-		newCluster.Clusters[clusterId] = targets
+		newShard.Shards[shardId] = targets
 
-		join := newCluster.Join[clusterId]
-		delete(join, storages[1].GetNodeId())
-		//join[storages[1].GetNodeId()] = false
-		newCluster.Join[clusterId] = join
+		join := newShard.Join[shardId]
+		delete(join, storages[1].GetReplicaId())
+		//join[storages[1].GetReplicaId()] = false
+		newShard.Join[shardId] = join
 
-		initialMembers := newCluster.InitialMembers[clusterId]
-		delete(initialMembers, storages[1].GetNodeId())
-		newCluster.InitialMembers[clusterId] = initialMembers
+		initialMembers := newShard.InitialMembers[shardId]
+		delete(initialMembers, storages[1].GetReplicaId())
+		newShard.InitialMembers[shardId] = initialMembers
 	}
 
 	// 调用接口，更新集群分配配置
-	storages[1].UpdateClusterMessage(newCluster)
+	storages[1].UpdateShardMessage(newShard)
 
 	// sleep 一定时间，便于gossip数据同步收敛
 	time.Sleep(5 * time.Second)
@@ -472,10 +472,10 @@ func TestRaftNodeLeave(t *testing.T) {
 	// t.Log("after membership: ", string(b))
 
 	// 此处测试如果不通过，没影响，需要根据gossip的收敛速度来的，目前的收敛速度是秒级
-	s2Cluster := storages[2].GetClusterMessage()
-	t.Log("GetClusterMessage", storages[2].GetNodeId(), storages[2].GetTarget(), newCluster.Revision, s2Cluster.Revision)
-	if s2Cluster.Revision != newCluster.Revision {
-		t.Fatalf("cluster config unexpected, [%d - %d]", s2Cluster.Revision, newCluster.Revision)
+	s2Shard := storages[2].GetShardMessage()
+	t.Log("GetShardMessage", storages[2].GetReplicaId(), storages[2].GetTarget(), newShard.Revision, s2Shard.Revision)
+	if s2Shard.Revision != newShard.Revision {
+		t.Fatalf("shard config unexpected, [%d - %d]", s2Shard.Revision, newShard.Revision)
 	}
 
 	t.Logf("==================storage join test down======================")
@@ -503,27 +503,27 @@ func testRaftGet(s *raft.Storage) (uint64, []byte, error) {
 	return s.Get(config.ColumnFamilyDefault, key, false, []byte(key))
 }
 
-func initClusterMessage(nodeMap map[string][]uint64) *gossip.RaftClusterMessage {
-	clusters := make(map[uint64][]string)
-	targets := make(map[string]gossip.TargetClusterId)
+func initShardMessage(replicaMap map[string][]uint64) *gossip.RaftShardMessage {
+	shards := make(map[uint64][]string)
+	targets := make(map[string]gossip.TargetShardId)
 	m := make(map[string]uint64)
-	for addr, clusterIds := range nodeMap {
-		nodeId := addr2RaftNodeID(addr)
-		targetAddr := fmt.Sprintf("nhid-%d", nodeId)
-		m[targetAddr] = nodeId
-		for _, clusterId := range clusterIds {
-			clusters[clusterId] = append(clusters[clusterId], targetAddr)
+	for addr, shardIds := range replicaMap {
+		replicaId := addr2RaftReplicaID(addr)
+		targetAddr := fmt.Sprintf("nhid-%d", replicaId)
+		m[targetAddr] = replicaId
+		for _, shardId := range shardIds {
+			shards[shardId] = append(shards[shardId], targetAddr)
 		}
 		ss := strings.Split(addr, ":")
-		targets[targetAddr] = gossip.TargetClusterId{
-			GrpcAddr:   fmt.Sprintf("%s:%d", ss[0], grpcPorts[addr]),
-			ClusterIds: clusterIds,
+		targets[targetAddr] = gossip.TargetShardId{
+			GrpcAddr: fmt.Sprintf("%s:%d", ss[0], grpcPorts[addr]),
+			ShardIds: shardIds,
 		}
 	}
 
 	initialMembers := make(map[uint64]map[uint64]string)
 	join := make(map[uint64]map[uint64]bool)
-	for clusterId, targets := range clusters {
+	for shardId, targets := range shards {
 		im := make(map[uint64]string)
 		jn := make(map[uint64]bool)
 		for _, target := range targets {
@@ -531,14 +531,14 @@ func initClusterMessage(nodeMap map[string][]uint64) *gossip.RaftClusterMessage 
 			jn[m[target]] = false
 		}
 
-		initialMembers[clusterId] = im
-		join[clusterId] = jn
+		initialMembers[shardId] = im
+		join[shardId] = jn
 	}
 
-	initRcm := &gossip.RaftClusterMessage{
+	initRcm := &gossip.RaftShardMessage{
 		Revision:       1,
 		Targets:        targets,
-		Clusters:       clusters,
+		Shards:         shards,
 		InitialMembers: initialMembers,
 		Join:           join,
 	}
@@ -546,42 +546,42 @@ func initClusterMessage(nodeMap map[string][]uint64) *gossip.RaftClusterMessage 
 	return initRcm
 }
 
-func getClusterId(hashKey string) uint64 {
+func getShardId(hashKey string) uint64 {
 	return uint64(crc32.ChecksumIEEE([]byte(hashKey)) % uint32(groupNumber))
 }
 
 func initialMembers(gossip bool) map[uint64]string {
 	initialMembers := make(map[uint64]string)
 	for _, addr := range raftAddrs {
-		nodeId := addr2RaftNodeID(addr)
+		replicaId := addr2RaftReplicaID(addr)
 		if gossip {
-			initialMembers[nodeId] = fmt.Sprintf("nhid-%d", nodeId)
+			initialMembers[replicaId] = fmt.Sprintf("nhid-%d", replicaId)
 		} else {
-			initialMembers[nodeId] = addr
+			initialMembers[replicaId] = addr
 		}
 	}
 
 	return initialMembers
 }
 
-func generateRaftClusters() map[string][]uint64 {
+func generateRaftShards() map[string][]uint64 {
 	groups := combination(raftAddrs, groupMachine)
 	n := len(groups)
 	skip := (n - groupNumber) / 2
 
-	clusters := [][]string{}
+	shards := [][]string{}
 	for i := 0; i < groupNumber; i++ {
-		clusters = append(clusters, groups[i+skip])
+		shards = append(shards, groups[i+skip])
 	}
 
-	nodeMap := make(map[string][]uint64)
-	for id, cluster := range clusters {
-		for _, addr := range cluster {
-			nodeMap[addr] = append(nodeMap[addr], uint64(id))
+	replicaMap := make(map[string][]uint64)
+	for id, shard := range shards {
+		for _, addr := range shard {
+			replicaMap[addr] = append(replicaMap[addr], uint64(id))
 		}
 	}
 
-	return nodeMap
+	return replicaMap
 }
 
 // [
@@ -627,7 +627,7 @@ func helper(arrs []string, start, k, n int, ans []string, res *[][]string) {
 	}
 }
 
-func addr2RaftNodeID(addr string) uint64 {
+func addr2RaftReplicaID(addr string) uint64 {
 	s := strings.Split(addr, ":")
 	bits := strings.Split(s[0], ".")
 

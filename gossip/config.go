@@ -36,6 +36,7 @@ type GossipConfig struct {
 	// format of IP:Port, Hostname:Port or DNS Name:Port.
 	BindAddress string `json:"-"`
 	BindPort    uint16 `json:"bindPort"`
+
 	// AdvertiseAddress is the address to advertise to other NodeHost instances
 	// used for NAT traversal. Gossip services running on remote NodeHost
 	// instances will use AdvertiseAddress to exchange gossip service related
@@ -53,8 +54,8 @@ type GossipConfig struct {
 	// launch shortly afterwards.
 	Seeds []string `json:"seeds"`
 
-	// 用于当cluster的数据在gossip内更新后，存储到文件中的接口
-	clusterCallback ClusterCallback `json:"-"`
+	// 用于当shard的数据在gossip内更新后，存储到文件中的接口
+	shardCallback ShardCallback `json:"-"`
 }
 
 // IsEmpty returns a boolean flag indicating whether the GossipConfig instance
@@ -63,8 +64,8 @@ func (g *GossipConfig) IsEmpty() bool {
 	return len(g.BindAddress) == 0 && len(g.Seeds) == 0
 }
 
-func (g *GossipConfig) SetClusterCallback(fn ClusterCallback) {
-	g.clusterCallback = fn
+func (g *GossipConfig) SetShardCallback(fn ShardCallback) {
+	g.shardCallback = fn
 }
 
 // Validate validates the GossipConfig instance.
@@ -75,8 +76,8 @@ func (g *GossipConfig) Validate() error {
 		return errors.New("BindAddress not set")
 	}
 
-	if g.clusterCallback == nil {
-		return errors.New("clusterCallback not set")
+	if g.shardCallback == nil {
+		return errors.New("shardCallback not set")
 	}
 
 	// if len(g.AdvertiseAddress) > 0 && !isValidAdvertiseAddress(g.AdvertiseAddress) {
