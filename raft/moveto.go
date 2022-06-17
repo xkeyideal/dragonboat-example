@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	pb "github.com/xkeyideal/dragonboat-example/v3/moveto"
+	pb "github.com/xkeyideal/dragonboat-example/v3/pb/moveto"
 	"github.com/xkeyideal/dragonboat-example/v3/raft/command"
 
 	"go.uber.org/zap"

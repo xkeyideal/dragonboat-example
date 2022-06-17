@@ -49,7 +49,7 @@ func (rm *RaftShardMessage) String() string {
 type MemberInfo struct {
 	ShardId        uint64
 	ConfigChangeId uint64
-	Nodes          map[uint64]string
+	Replicas       map[uint64]string
 	Observers      map[uint64]string
 	LeaderId       uint64
 	LeaderValid    bool

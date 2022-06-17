@@ -19,7 +19,7 @@ import (
 	"github.com/xkeyideal/dragonboat-example/v3/store"
 
 	zlog "github.com/xkeyideal/dragonboat-example/v3/internal/logger"
-	pb "github.com/xkeyideal/dragonboat-example/v3/moveto"
+	pb "github.com/xkeyideal/dragonboat-example/v3/pb/moveto"
 
 	"github.com/lni/dragonboat/v3"
 	"github.com/lni/dragonboat/v3/client"
@@ -381,8 +381,8 @@ func (s *Storage) getShardIds() []uint64 {
 	return shard.Targets[s.target].ShardIds
 }
 
-func (s *Storage) getShardId(hashKey string) uint64 {
-	return uint64(crc32.ChecksumIEEE([]byte(hashKey)) % s.cfg.MultiGroupSize)
+func (s *Storage) getShardId(hashKey []byte) uint64 {
+	return uint64(crc32.ChecksumIEEE(hashKey) % s.cfg.MultiGroupSize)
 }
 
 func (s *Storage) GetReplicaId() uint64 {
@@ -413,7 +413,7 @@ func (s *Storage) getShardMembership(shardId uint64) (*gossip.MemberInfo, error)
 	return &gossip.MemberInfo{
 		ShardId:        shardId,
 		ConfigChangeId: membership.ConfigChangeID,
-		Nodes:          membership.Nodes,
+		Replicas:       membership.Nodes,
 		Observers:      membership.Observers,
 		LeaderId:       leaderID,
 		LeaderValid:    valid,

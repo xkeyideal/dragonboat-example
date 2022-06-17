@@ -18,8 +18,8 @@ type TryLockCommand struct {
 	resp          []byte
 }
 
-func NewTryLockCommand(cfName string, key string, second uint64) *TryLockCommand {
-	return &TryLockCommand{CfName: cfName, Key: []byte(key), TimeoutSecond: second}
+func NewTryLockCommand(cfName string, key []byte, second uint64) *TryLockCommand {
+	return &TryLockCommand{CfName: cfName, Key: key, TimeoutSecond: second}
 }
 
 func (c *TryLockCommand) Linear() bool {

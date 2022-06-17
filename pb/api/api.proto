@@ -1,0 +1,195 @@
+syntax = "proto3";
+
+option go_package = ".;api";
+
+message GetRequest {
+    bytes key = 1;
+    bool linearizable = 2;
+}
+
+message GetResponse {
+    bytes key = 1;
+    bytes val = 2;
+    uint64 revision = 3;
+}
+
+message PutRequest {
+    bytes key = 1;
+    bytes val = 2;
+}
+
+message PutResponse {
+    bytes key = 1;
+    uint64 revision = 2;
+}
+
+message DelRequest {
+    bytes key = 1;
+}
+
+message DelResponse {
+    bytes key = 1;
+    bytes val = 2;
+    uint64 revision = 3;
+}
+
+service KV {
+    rpc Get(GetRequest) returns (GetResponse) {}
+
+    rpc Put(PutRequest) returns (PutResponse) {}
+
+    rpc Del(DelRequest) returns (DelResponse) {}
+}
+
+message WEmpty {}
+
+message TargetShard {
+    // moveTo的grpc addr
+    string grpc_addr = 1;
+    
+    // 节点管理的ShardId
+    repeated uint64 shard_ids = 2;
+}
+
+message ShardJoin {
+    // key: nodeId, val: bool
+    map<uint64, bool> join = 1;
+}
+
+message ShardInitialMember {
+    // key: nodeId, val: target
+    map<uint64, string> initial_members = 1;
+}
+
+message RaftReleaseConfig {
+    message GossipConfig {
+        // gossip的端口号
+        uint32 gossip_port = 1;
+
+        // gossip集群地址
+        repeated string gossip_seeds = 2;
+    }
+
+    // 1-5的数据启动后不可变更
+
+    // raft Shard的分组个数, 用于hashKey计算ShardId
+    uint32 multi_group_size = 1;
+
+    // 节点ShardId分配的版本号
+    int64 revision = 2;
+
+    // 本地的节点ID
+    uint64 replica_id = 3;
+
+    // raft的通信端口号
+    uint32 raft_port = 4;
+
+    // 是否采用gossip方式启动
+    bool gossip = 5;
+
+    // ShardId相应的节点是否是join的方式加入集群的
+    // key: ShardId
+    map<uint64, ShardJoin> join = 10;
+
+    // ShardId的集群最初节点
+    // key: ShardId
+    map<uint64, ShardInitialMember> initial_members = 11;
+
+    // 整个raft集群ShardIds和moveTo grpcAddr的分配情况
+    // key: 当raft以nodehostid=true的方式起的时候是机器ID，以固定地址方式起是raftAddr
+    map<string, TargetShard> target_map = 20;
+
+    // moveTo启动的grpc端口号
+    uint32 grpc_port = 21;
+
+    // 以gossip方式启动时raft需配置的gossip配置
+    GossipConfig raft_gossip_config = 22;
+
+    // 业务内部通过gossip协议交流数据的gossip配置
+    GossipConfig business_gossip_config = 23;
+
+    // raft是否开启metrics
+    bool metrics = 24;
+}
+
+message RaftShard {
+    // 节点ShardId分配的版本号
+    int64 revision = 1;
+
+    // 整个raft集群ShardIds和moveTo grpcAddr的分配情况
+    // key: 当raft以nodehostid=true的方式起的时候是机器ID，以固定地址方式起是raftAddr
+    map<string, TargetShard> target_map = 2;
+
+    // ShardId相应的节点是否是join的方式加入集群的
+    // key: ShardId
+    map<uint64, ShardJoin> join = 3;
+
+    // ShardId的集群最初节点
+    // key: ShardId
+    map<uint64, ShardInitialMember> initial_members = 4;
+}
+
+message RaftShardIds {
+    repeated uint64 shard_ids = 1;
+    bool add = 2;
+}
+
+message RaftInfoResponse {
+    message MemberInfo {
+        uint64 shard_id = 1;
+        uint64 config_change_id = 2;
+        map<uint64, string> replicas = 3;
+        uint64 leader_id = 4;
+        bool leader_valid = 5;
+        map<uint64, string> observers = 6;
+    }
+
+    message Target {
+        repeated string targets = 1;
+    }
+
+    message ShardInfo {
+        int64 revision = 1;
+        map<string, TargetShard> targets = 2;
+        map<uint64, Target> shards = 3;
+    }
+
+    // gossip里同步的raft membership
+    repeated MemberInfo member_infos = 1;
+
+    // gossip里同步的集群分配信息
+    ShardInfo shard_infos = 2;
+
+    // gossip用于检测MoveTo grpc地址的存活信息
+    map<string, bool> gossip_infos = 3;
+}
+
+// 新增、删除机器 | 为已存的机器添加shard
+message RaftOp {
+    uint64 replica_id = 1;
+    string target = 2;
+    repeated uint64 shard_ids = 3;
+}
+
+service RaftControl {
+    // 控制中心向raft集群下发启动的metadata和集群的分配情况
+    rpc ReleaseRaftConf(RaftReleaseConfig) returns(WEmpty){}
+
+    // 控制中心更新集群分配信息
+    rpc ReleaseRaftShard(RaftShard) returns(WEmpty){}
+
+    // 控制中心在Join或Leave ShardIds后通知raft集群修改相应ShardId的state machine
+    rpc UpdateRaftShardIds(RaftShardIds) returns(WEmpty){}
+
+    // raft集群概要
+    rpc RaftShardInfo(WEmpty) returns (RaftInfoResponse) {}
+
+    // 新增observer节点
+    rpc AddRaftObserverReplica(RaftOp) returns (WEmpty) {}
+
+    // 新增raft节点
+    rpc AddRaftReplica(RaftOp) returns (WEmpty) {}
+
+    // 删除raft节点
+    rpc RemoveRaftReplica(RaftOp) returns (WEmpty) {}
+}

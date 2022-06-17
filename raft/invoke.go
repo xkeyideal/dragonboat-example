@@ -6,7 +6,7 @@ import (
 	"math/rand"
 
 	"github.com/xkeyideal/dragonboat-example/v3/gossip"
-	pb "github.com/xkeyideal/dragonboat-example/v3/moveto"
+	pb "github.com/xkeyideal/dragonboat-example/v3/pb/moveto"
 	"github.com/xkeyideal/dragonboat-example/v3/raft/command"
 
 	"go.uber.org/zap"
@@ -84,7 +84,7 @@ func (s *Storage) moveToAddress(shardId uint64, linear bool) (int64, string, str
 		return rcm.Revision, address, "", fmt.Errorf("linear shardId: %d not found membership", shardId)
 	}
 
-	nhid, ok = rmm.Nodes[rmm.LeaderId]
+	nhid, ok = rmm.Replicas[rmm.LeaderId]
 	if !ok {
 		return rcm.Revision, address, "", fmt.Errorf("linear shardId: %d not found leader node", shardId)
 	}

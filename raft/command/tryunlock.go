@@ -15,8 +15,8 @@ type TryUnlockCommand struct {
 	resp   []byte
 }
 
-func NewTryUnLockCommand(cfName string, key string) *TryUnlockCommand {
-	return &TryUnlockCommand{CfName: cfName, Key: []byte(key)}
+func NewTryUnLockCommand(cfName string, key []byte) *TryUnlockCommand {
+	return &TryUnlockCommand{CfName: cfName, Key: key}
 }
 
 func (c *TryUnlockCommand) Linear() bool {

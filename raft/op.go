@@ -8,8 +8,8 @@ import (
 	"github.com/xkeyideal/dragonboat-example/v3/raft/command"
 )
 
-func (s *Storage) Put(cfName string, hashKey string, confID, confBytes []byte) (uint64, error) {
-	cmd := command.NewPutCommand(cfName, confID, confBytes)
+func (s *Storage) Put(cfName string, hashKey []byte, key, val []byte) (uint64, error) {
+	cmd := command.NewPutCommand(cfName, key, val)
 
 	shardId := s.getShardId(hashKey)
 	var (
@@ -34,7 +34,7 @@ func (s *Storage) Put(cfName string, hashKey string, confID, confBytes []byte) (
 	return binary.BigEndian.Uint64(res), nil
 }
 
-func (s *Storage) Get(cfName string, hashKey string, linearizable bool, key []byte) (uint64, []byte, error) {
+func (s *Storage) Get(cfName string, hashKey []byte, linearizable bool, key []byte) (uint64, []byte, error) {
 	cmd := command.NewGetCommand(cfName, key, linearizable)
 	shardId := s.getShardId(hashKey)
 
@@ -56,7 +56,7 @@ func (s *Storage) Get(cfName string, hashKey string, linearizable bool, key []by
 	return binary.BigEndian.Uint64(res), res[8:], nil
 }
 
-func (s *Storage) TryLock(lockTimeout uint64, cfName string, key string) (bool, error) {
+func (s *Storage) TryLock(lockTimeout uint64, cfName string, key []byte) (bool, error) {
 	var currentUnix = uint64(time.Now().Unix())
 
 	var timeoutSecond = currentUnix + lockTimeout
@@ -86,7 +86,7 @@ func (s *Storage) TryLock(lockTimeout uint64, cfName string, key string) (bool, 
 	return false, nil
 }
 
-func (s *Storage) TryUnLock(cfName string, key string) (bool, error) {
+func (s *Storage) TryUnLock(cfName string, key []byte) (bool, error) {
 	cmd := command.NewTryUnLockCommand(cfName, key)
 	shardId := s.getShardId(key)
 	var (
@@ -110,7 +110,7 @@ func (s *Storage) TryUnLock(cfName string, key string) (bool, error) {
 	return false, nil
 }
 
-func (s *Storage) Search(cfName string, hashKey string, linearizable bool, prefix []byte) ([][]byte, error) {
+func (s *Storage) Search(cfName string, hashKey []byte, linearizable bool, prefix []byte) ([][]byte, error) {
 	cmd := command.NewSearchCommand(cfName, prefix, linearizable)
 	shardId := s.getShardId(hashKey)
 
@@ -136,7 +136,7 @@ func (s *Storage) Search(cfName string, hashKey string, linearizable bool, prefi
 	return result, nil
 }
 
-func (s *Storage) Del(cfName string, hashKey string, key []byte) error {
+func (s *Storage) Del(cfName string, hashKey, key []byte) error {
 	cmd := command.NewDelCommand(cfName, key)
 	shardId := s.getShardId(hashKey)
 
@@ -153,7 +153,7 @@ func (s *Storage) Del(cfName string, hashKey string, key []byte) error {
 	return err
 }
 
-func (s *Storage) DelPrefix(cfName string, hashKey string, prefix []byte) error {
+func (s *Storage) DelPrefix(cfName string, hashKey, prefix []byte) error {
 	cmd := command.NewDelPrefixCommand(cfName, prefix)
 	shardId := s.getShardId(hashKey)
 
