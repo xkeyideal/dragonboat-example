@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+option go_package = ".;moveto";
+
+enum MoveToStatus {
+    Success = 0; // 命中可执行命令的节点
+
+    Miss = 1;    // 没命中可执行命令的节点
+}
+
+message MoveToCommand {
+    // 根据hashkey计算的clusterId
+    uint64 cluster_id = 1;
+
+    // cluster的版本号
+    int64 revision = 2;
+
+    // 待执行的命令序列化字节数组
+    bytes cmd = 4;
+}
+
+message MoveToResponse {
+    // 返回的状态, 用于标记是否调转到可执行命令的节点上了
+    MoveToStatus status = 1;
+
+    // 没命中时，moveTo节点的cluster集群分配版本号
+    int64 revision = 2;
+
+    // 没命中时，建议跳转的节点
+    string recommend_addr = 3;
+
+    bytes result = 4;
+}
+
+message RaftInvokeOp {
+    uint64 node_id = 1;
+    string target = 2;
+    uint64 cluster_id = 3;
+    uint32 op = 4;
+    bool linear = 5;
+
+    // cluster的版本号
+    int64 revision = 6;
+}
+
+
+service MoveTo {
+    rpc MoveToInvoke(MoveToCommand) returns(MoveToResponse) {}
+    rpc RaftNodeInvoke(RaftInvokeOp) returns(MoveToResponse) {}
+}
